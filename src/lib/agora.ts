@@ -8,6 +8,15 @@ type LiveSession = {
 
 let session: LiveSession | null = null;
 
+function prep(el: HTMLElement) {
+  el.style.width = '100%';
+  el.style.height = '100%';
+  el.style.minHeight = '120px';
+  el.style.background = '#000';
+  el.style.overflow = 'hidden';
+  el.replaceChildren();
+}
+
 export async function startUserAgoraCall(options: {
   appId: string;
   channel: string;
@@ -17,19 +26,27 @@ export async function startUserAgoraCall(options: {
   remoteVideoEl: HTMLElement;
 }) {
   await stopUserAgoraCall();
+  prep(options.localVideoEl);
+  prep(options.remoteVideoEl);
 
   const AgoraRTC = (await import('agora-rtc-sdk-ng')).default;
+  AgoraRTC.setLogLevel(4);
   const client = AgoraRTC.createClient({ mode: 'rtc', codec: 'vp8' });
 
-  client.on('user-published', async (user, mediaType) => {
+  const playRemote = async (
+    user: import('agora-rtc-sdk-ng').IAgoraRTCRemoteUser,
+    mediaType: 'audio' | 'video',
+  ) => {
     await client.subscribe(user, mediaType);
     if (mediaType === 'video' && user.videoTrack) {
-      user.videoTrack.play(options.remoteVideoEl);
+      user.videoTrack.play(options.remoteVideoEl, { fit: 'cover' });
     }
     if (mediaType === 'audio' && user.audioTrack) {
       user.audioTrack.play();
     }
-  });
+  };
+
+  client.on('user-published', playRemote);
 
   await client.join(
     options.appId,
@@ -38,8 +55,16 @@ export async function startUserAgoraCall(options: {
     options.uid,
   );
 
-  const [mic, cam] = await AgoraRTC.createMicrophoneAndCameraTracks();
-  cam.play(options.localVideoEl);
+  for (const user of client.remoteUsers) {
+    if (user.hasVideo) await playRemote(user, 'video');
+    if (user.hasAudio) await playRemote(user, 'audio');
+  }
+
+  const [mic, cam] = await AgoraRTC.createMicrophoneAndCameraTracks(
+    {},
+    { encoderConfig: '480p_1' },
+  );
+  cam.play(options.localVideoEl, { fit: 'cover' });
   await client.publish([mic, cam]);
 
   session = { client, mic, cam };

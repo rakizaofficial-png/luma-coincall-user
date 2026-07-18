@@ -123,10 +123,19 @@ export default function CallSessionClient({
         const token = await fetchCallToken(accepted.id);
         if (cancelled) return;
 
-        await new Promise((r) => setTimeout(r, 200));
-        if (!localRef.current || !remoteRef.current) {
-          throw new Error("Video containers missing");
+        // Wait until video surfaces are in the DOM and painted
+        for (let i = 0; i < 40; i++) {
+          if (localRef.current && remoteRef.current) break;
+          await new Promise((r) => requestAnimationFrame(() => r(null)));
         }
+        if (!localRef.current || !remoteRef.current) {
+          throw new Error("Video surface missing — reload and allow camera");
+        }
+
+        // Show surfaces before joining so Agora has sized containers
+        setPhase("connected");
+        setStatusText("Starting camera…");
+        await new Promise((r) => setTimeout(r, 120));
 
         await startUserAgoraCall({
           appId: token.appId,
@@ -138,7 +147,6 @@ export default function CallSessionClient({
         });
 
         if (cancelled) return;
-        setPhase("connected");
         setStatusText(`Connected with ${host.name}`);
         pushToast(`You’re live with ${host.name}`);
       } catch (e: unknown) {
@@ -200,7 +208,7 @@ export default function CallSessionClient({
 
   return (
     <main className="relative min-h-dvh overflow-hidden bg-ink">
-      {phase !== "connected" && (
+      {phase !== "connected" && phase !== "ringing" && (
         <Image
           src={displayImage}
           alt={displayName}
@@ -209,10 +217,30 @@ export default function CallSessionClient({
           className={`object-cover transition ${camOff ? "blur-xl brightness-50" : "brightness-75"}`}
         />
       )}
+      {(phase === "ringing" || phase === "loading") && (
+        <div className="absolute inset-0 z-[1] flex flex-col items-center justify-center bg-gradient-to-b from-ink via-ink-2 to-coral/30">
+          <div className="relative mb-6">
+            <span className="absolute inset-0 animate-ping rounded-full bg-coral/40" />
+            <Image
+              src={displayImage}
+              alt=""
+              width={120}
+              height={120}
+              className="relative h-28 w-28 rounded-full object-cover ring-4 ring-coral/50"
+            />
+          </div>
+          <p className="font-display text-2xl font-extrabold">{displayName}</p>
+          <p className="mt-2 text-sm text-gold">
+            {phase === "ringing" ? "Ringing host…" : "Connecting…"}
+          </p>
+        </div>
+      )}
       <div
         ref={remoteRef}
         id="agora-remote"
-        className={`absolute inset-0 bg-black ${phase === "connected" ? "z-[1]" : "z-0 opacity-0"}`}
+        className={`absolute inset-0 bg-black ${
+          phase === "connected" ? "z-[1] opacity-100" : "z-0 opacity-0"
+        }`}
       />
       <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-b from-black/55 via-transparent to-black/85" />
 
