@@ -18,7 +18,7 @@ import { GiftSheet } from "@/components/GiftSheet";
 import { LoungeShell } from "@/components/LoungeShell";
 import { VipRibbon } from "@/components/VipRibbon";
 import { WalletDiamond } from "@/components/WalletDiamond";
-import { creators, giftTickerLines, type Creator } from "@/lib/data";
+import { giftTickerLines } from "@/lib/data";
 import { fetchLiveHosts, type LiveHost } from "@/lib/api";
 import {
   resolveHostActivity,
@@ -26,9 +26,7 @@ import {
 } from "@/lib/hostActivity";
 import { useApp } from "@/lib/store";
 
-type FeedItem =
-  | { kind: "live"; host: LiveHost }
-  | { kind: "demo"; creator: Creator };
+type FeedItem = { host: LiveHost };
 
 function ActivityBadge({
   mode,
@@ -74,7 +72,7 @@ function ActivityBadge({
 
 export function SwipeFeed() {
   const router = useRouter();
-  const { isPremium, spend, openTopUp, coins } = useApp();
+  const { openTopUp, coins } = useApp();
   const [items, setItems] = useState<FeedItem[]>([]);
   const [index, setIndex] = useState(0);
   const [giftOpen, setGiftOpen] = useState(false);
@@ -85,18 +83,10 @@ export function SwipeFeed() {
   const load = useCallback(async () => {
     try {
       const hosts = await fetchLiveHosts();
-      if (hosts.length) {
-        setItems(hosts.map((h) => ({ kind: "live" as const, host: h })));
-        return;
-      }
+      setItems(hosts.map((h) => ({ host: h })));
     } catch {
-      /* demo fallback */
+      setItems([]);
     }
-    setItems(
-      creators
-        .filter((c) => c.online || c.live)
-        .map((c) => ({ kind: "demo" as const, creator: c })),
-    );
   }, []);
 
   useEffect(() => {
@@ -136,30 +126,15 @@ export function SwipeFeed() {
     touchY.current = null;
   };
 
-  const hostId =
-    current?.kind === "live"
-      ? current.host.id
-      : current?.kind === "demo"
-        ? current.creator.id
-        : "";
+  const hostId = current?.host.id ?? "";
   const activity = current
-    ? resolveHostActivity(
-        hostId,
-        current.kind === "live"
-          ? {
-              isLive: current.host.isLive,
-              isOnCall: current.host.isOnCall,
-            }
-          : { isLive: current.creator.live },
-      )
+    ? resolveHostActivity(hostId, {
+        isLive: current.host.isLive,
+        isOnCall: current.host.isOnCall,
+      })
     : null;
 
-  const rate =
-    current?.kind === "live"
-      ? current.host.ratePerMinute
-      : current?.kind === "demo"
-        ? current.creator.callRate
-        : 80;
+  const rate = current?.host.ratePerMinute ?? 80;
 
   const routeToHost = () => {
     if (!current || !activity) return;
@@ -167,78 +142,69 @@ export function SwipeFeed() {
       openTopUp(15);
       return;
     }
-    // Party Room → join as audience
     if (activity.mode === "party_room") {
-      const id =
-        current.kind === "live" ? current.host.id : current.creator.id;
-      router.push(`/party/${id}`);
+      router.push(`/party/${current.host.id}`);
       return;
     }
-    // PK Battle or solo → 1v1 (blur optional)
-    if (current.kind === "live") {
-      const href = blurOn
-        ? `/call/${current.host.id}?live=1&blur=1`
-        : `/call/${current.host.id}?live=1`;
-      router.push(href);
-      return;
-    }
-    const cost = isPremium ? 30 : 60;
-    if (!spend(cost, blurOn ? "Blind match started…" : "Starting 1v1…")) return;
     router.push(
       blurOn
-        ? `/call/${current.creator.id}?blur=1`
-        : `/call/${current.creator.id}`,
+        ? `/call/${current.host.id}?live=1&blur=1`
+        : `/call/${current.host.id}?live=1`,
     );
   };
 
   const callNow = () => {
     if (!current) return;
-    // Explicit private call always goes 1v1 even if host is in party
     if (coins < rate) {
       openTopUp(15);
       return;
     }
-    if (current.kind === "live") {
-      router.push(
-        blurOn
-          ? `/call/${current.host.id}?live=1&blur=1`
-          : `/call/${current.host.id}?live=1`,
-      );
-      return;
-    }
-    const cost = isPremium ? 30 : 60;
-    if (!spend(cost, blurOn ? "Blind match…" : "Private call…")) return;
     router.push(
       blurOn
-        ? `/call/${current.creator.id}?blur=1`
-        : `/call/${current.creator.id}`,
+        ? `/call/${current.host.id}?live=1&blur=1`
+        : `/call/${current.host.id}?live=1`,
     );
   };
 
-  if (!current || !activity) {
+  if (!items.length) {
     return (
-      <LoungeShell minuteRate={80}>
-        <div className="flex min-h-[70dvh] items-center justify-center px-6 text-center text-sm text-cyan/70">
-          Loading elite lounge hosts…
+      <LoungeShell minuteRate={80} enableAutoTopUp={false}>
+        <div className="flex min-h-[70dvh] flex-col items-center justify-center gap-3 px-6 text-center">
+          <p className="font-display text-lg font-bold text-sand">
+            No live hosts online
+          </p>
+          <p className="text-sm text-cyan/70">
+            Waiting for CoinCall hosts via `/api/hosts`. AI fallback starts when
+            you place a 1v1 call.
+          </p>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-full border border-cyan/40 px-4 py-2 text-xs font-bold text-cyan"
+          >
+            Refresh API
+          </button>
         </div>
       </LoungeShell>
     );
   }
 
-  const name =
-    current.kind === "live" ? current.host.name : current.creator.name;
+  if (!current || !activity) {
+    return (
+      <LoungeShell minuteRate={80}>
+        <div className="flex min-h-[70dvh] items-center justify-center px-6 text-center text-sm text-cyan/70">
+          Syncing live hosts…
+        </div>
+      </LoungeShell>
+    );
+  }
+
+  const name = current.host.name;
   const image =
-    current.kind === "live"
-      ? current.host.avatarUrl ||
-        `https://i.pravatar.cc/800?u=${encodeURIComponent(current.host.id)}`
-      : current.creator.image;
-  const meta =
-    current.kind === "live"
-      ? `${current.host.country || "Lounge"} · ${activity.label}`
-      : `${current.creator.country} ${current.creator.flag} · ${activity.label}`;
-  const viewers =
-    activity.viewers ??
-    (current.kind === "demo" ? current.creator.viewers : undefined);
+    current.host.avatarUrl ||
+    `https://i.pravatar.cc/800?u=${encodeURIComponent(current.host.id)}`;
+  const meta = `${current.host.country || "Live"} · ${activity.label}`;
+  const viewers = activity.viewers;
 
   return (
     <LoungeShell minuteRate={rate}>

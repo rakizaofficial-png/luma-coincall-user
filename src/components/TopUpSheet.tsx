@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Coins, Sparkles, X, Zap } from "lucide-react";
-import { purchaseCoinPack, loadStorePacks } from "@/services/billing/iap";
-import type { CoinPackDto } from "@/services/walletApi";
+import { IAP_PRODUCTS } from "@/lib/payments/iapCatalog";
+import { purchaseCoins } from "@/lib/payments/iap";
 import { useApp } from "@/lib/store";
 
 /**
- * Production top-up sheet — packs from API, purchase via IAP / Play Billing.
+ * Production top-up sheet — Google Play / Apple IAP via backend verify.
  */
 export function TopUpSheet({
   open,
@@ -21,32 +21,32 @@ export function TopUpSheet({
   graceLeft?: number;
   minuteRate?: number;
 }) {
-  const { pushToast, refreshWallet } = useApp();
-  const [packs, setPacks] = useState<CoinPackDto[]>([]);
+  const { userId, pushToast, syncWallet } = useApp();
   const [busy, setBusy] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    void loadStorePacks()
-      .then(setPacks)
-      .catch(() => setPacks([]));
-  }, [open]);
-
-  const buy = async (pack: CoinPackDto) => {
-    setBusy(pack.id);
-    pushToast("Opening store billing…");
-    const result = await purchaseCoinPack(pack);
-    setBusy(null);
-    if (!result.ok) {
-      pushToast(result.error);
+  const buy = async (productId: string) => {
+    if (!userId) {
+      pushToast("Wallet not ready — retry in a moment");
       return;
     }
-    if (result.walletCoins >= 0) {
-      await refreshWallet();
-      pushToast(`+${pack.coins} coins added`);
+    setBusy(productId);
+    try {
+      const result = await purchaseCoins({ userId, productId });
+      if ("redirected" in result) {
+        pushToast("Redirecting to Play Store checkout…");
+        return;
+      }
+      await syncWallet();
+      pushToast(`+${result.credited} coins added`);
+      onClose();
+    } catch (e: unknown) {
+      pushToast(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBusy(null);
     }
-    onClose();
   };
+
+  const tiers = IAP_PRODUCTS.slice(0, 3);
 
   return (
     <AnimatePresence>
@@ -80,7 +80,7 @@ export function TopUpSheet({
                 <p className="mt-1 text-xs text-cyan/80">
                   {minuteRate
                     ? `Below 1-minute rate (${minuteRate} coins)`
-                    : "Server-verified IAP"}
+                    : "Server-verified IAP credit"}
                   {graceLeft != null ? ` · ${graceLeft}s grace` : ""}
                 </p>
               </div>
@@ -94,47 +94,49 @@ export function TopUpSheet({
             </div>
 
             <div className="mt-4 space-y-2.5">
-              {packs.length === 0 && (
-                <p className="rounded-2xl border border-cyan/20 bg-ink-2 px-4 py-6 text-center text-sm text-cyan/70">
-                  Loading store packs from API…
-                </p>
-              )}
-              {packs.slice(0, 3).map((pack, i) => (
-                <motion.button
-                  key={pack.id}
-                  type="button"
-                  disabled={busy === pack.id}
-                  initial={{ opacity: 0, y: 12 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.05 * i }}
-                  onClick={() => void buy(pack)}
-                  className="flex w-full items-center gap-3 rounded-2xl border border-cyan/45 bg-ink-2/90 px-4 py-3.5 text-left shadow-[0_0_24px_rgba(0,240,255,0.2)] disabled:opacity-60"
-                >
-                  <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan/15 text-cyan">
-                    {pack.popular ? (
-                      <Sparkles className="h-5 w-5 text-gold" />
-                    ) : (
-                      <Coins className="h-5 w-5" />
-                    )}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="font-display text-sm font-bold text-sand">
-                      {pack.coins.toLocaleString()} coins
-                      {pack.bonus ? ` +${pack.bonus}` : ""}
-                    </p>
-                    <p className="text-[11px] text-cyan/75">
-                      SKU {pack.sku}
-                      {pack.popular ? " · Most loved" : ""}
-                    </p>
-                  </div>
-                  <span className="font-display text-lg font-extrabold text-cyan">
-                    {busy === pack.id ? "…" : pack.priceLabel}
-                  </span>
-                </motion.button>
-              ))}
+              {tiers.map((tier, i) => {
+                const total = tier.coins + tier.bonusCoins;
+                return (
+                  <motion.button
+                    key={tier.productId}
+                    type="button"
+                    disabled={busy === tier.productId}
+                    initial={{ opacity: 0, y: 12 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.05 * i }}
+                    onClick={() => void buy(tier.productId)}
+                    className={`flex w-full items-center gap-3 rounded-2xl border bg-ink-2/90 px-4 py-3.5 text-left ${
+                      tier.popular
+                        ? "border-coral/50 shadow-[0_0_24px_rgba(255,42,122,0.28)]"
+                        : "border-cyan/45 shadow-[0_0_24px_rgba(0,240,255,0.28)]"
+                    }`}
+                  >
+                    <span className="flex h-11 w-11 items-center justify-center rounded-xl bg-cyan/15 text-cyan">
+                      {tier.popular ? (
+                        <Sparkles className="h-5 w-5 text-gold" />
+                      ) : (
+                        <Coins className="h-5 w-5" />
+                      )}
+                    </span>
+                    <div className="min-w-0 flex-1">
+                      <p className="font-display text-sm font-bold text-sand">
+                        {tier.title}
+                      </p>
+                      <p className="text-[11px] text-cyan/75">
+                        {total.toLocaleString()} coins
+                        {tier.bonusCoins ? ` · +${tier.bonusCoins} bonus` : ""} ·{" "}
+                        {tier.productId}
+                      </p>
+                    </div>
+                    <span className="font-display text-lg font-extrabold text-cyan">
+                      {busy === tier.productId ? "…" : tier.priceLabel}
+                    </span>
+                  </motion.button>
+                );
+              })}
             </div>
             <p className="mt-3 text-center text-[10px] text-cyan/60">
-              Receipts verified server-side · call layout stays mounted
+              Credits apply only after `/api/wallet/iap/verify` succeeds
             </p>
           </motion.div>
         </>

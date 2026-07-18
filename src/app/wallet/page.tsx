@@ -1,55 +1,60 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { motion } from "framer-motion";
-import { Coins, Play, Sparkles, Store, Zap } from "lucide-react";
+import { Coins, Play, Store, Zap } from "lucide-react";
 import { TopBar } from "@/components/TopBar";
-import { purchaseCoinPack, loadStorePacks } from "@/services/billing/iap";
-import type { CoinPackDto } from "@/services/walletApi";
+import { purchaseCoins } from "@/lib/payments/iap";
+import type { IapProduct } from "@/lib/payments/iapCatalog";
+import { fetchCoinCatalog } from "@/lib/walletApi";
 import { useApp } from "@/lib/store";
 
-/**
- * Production wallet — balance from API, packs from /wallet/packs, buy via IAP.
- */
 export default function WalletPage() {
-  const { coins, isPremium, pushToast, refreshWallet, ready } = useApp();
-  const [packs, setPacks] = useState<CoinPackDto[]>([]);
+  const { coins, userId, ready, pushToast, syncWallet, isPremium } = useApp();
+  const [products, setProducts] = useState<IapProduct[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [buying, setBuying] = useState(false);
 
   useEffect(() => {
-    void loadStorePacks()
-      .then((list) => {
-        setPacks(list);
-        setSelected(
-          list.find((p) => p.popular)?.id || list[0]?.id || "",
-        );
-      })
-      .catch(() => pushToast("Could not load store packs"));
-  }, [pushToast]);
+    void fetchCoinCatalog().then((list) => {
+      setProducts(list as IapProduct[]);
+      const popular =
+        list.find((p) => p.popular)?.productId || list[0]?.productId || "";
+      setSelected(popular);
+    });
+  }, []);
 
-  const pack = packs.find((p) => p.id === selected) || packs[0];
+  const pack = products.find((p) => p.productId === selected) || products[0];
 
   const buyWithStore = async () => {
-    if (!pack) return;
-    setBuying(true);
-    pushToast("Opening Google Play / App Store…");
-    const result = await purchaseCoinPack(pack);
-    setBuying(false);
-    if (!result.ok) {
-      pushToast(result.error);
+    if (!pack || !userId) {
+      pushToast("Wallet not ready");
       return;
     }
-    await refreshWallet();
-    pushToast("Purchase verified · coins credited");
+    setBuying(true);
+    try {
+      const result = await purchaseCoins({
+        userId,
+        productId: pack.productId,
+      });
+      if ("redirected" in result) {
+        pushToast("Opening store checkout…");
+        return;
+      }
+      await syncWallet();
+      pushToast(`+${result.credited} coins credited`);
+    } catch (e: unknown) {
+      pushToast(e instanceof Error ? e.message : "Purchase failed");
+    } finally {
+      setBuying(false);
+    }
   };
 
   return (
     <main>
       <TopBar
         title="Coin wallet"
-        subtitle="Live balance · Play Billing / App Store IAP"
+        subtitle="Live balance · Google Play / App Store IAP"
       />
 
       <section className="px-4 pb-4">
@@ -58,87 +63,74 @@ export default function WalletPage() {
           animate={{ opacity: 1, y: 0 }}
           className="relative overflow-hidden rounded-3xl border border-cyan/25 bg-ink-2 p-5"
         >
-          <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-cyan">
-            <Coins className="h-3.5 w-3.5" /> Live balance
-            {!ready ? " · syncing…" : ""}
-          </p>
-          <p className="mt-1 font-display text-4xl font-extrabold tabular-nums text-sand">
-            {coins.toLocaleString()}
-          </p>
-          <p className="mt-1 text-sm text-cyan/70">
-            Server-authoritative wallet · WebSocket sync
-          </p>
-          <button
-            type="button"
-            onClick={() => void refreshWallet()}
-            className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-cyan/30 px-3 py-1.5 text-xs font-bold text-cyan"
-          >
-            <Zap className="h-3.5 w-3.5" /> Refresh
-          </button>
+          <div className="relative">
+            <p className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-cyan">
+              <Coins className="h-3.5 w-3.5" /> Live balance
+              {!ready ? " · syncing…" : ""}
+            </p>
+            <p className="mt-1 font-display text-4xl font-extrabold tabular-nums text-sand">
+              {coins.toLocaleString()}
+            </p>
+            <p className="mt-1 text-sm text-cyan/70">
+              User {userId ? `${userId.slice(0, 12)}…` : "—"} ·{" "}
+              {isPremium ? "VIP" : "Standard"}
+            </p>
+            <button
+              type="button"
+              onClick={() => void syncWallet()}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-full border border-cyan/30 px-3 py-1.5 text-xs font-bold text-cyan"
+            >
+              <Zap className="h-3.5 w-3.5" /> Refresh from API
+            </button>
+          </div>
         </motion.div>
       </section>
 
-      <section className="px-4 pb-4">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-display text-sm font-bold uppercase tracking-wider text-muted">
-            Store packs
-          </h2>
-          <span className="flex items-center gap-1 text-[10px] font-bold text-teal">
-            <Store className="h-3 w-3" /> Live SKUs
-          </span>
-        </div>
-        <div className="space-y-2">
-          {packs.map((p) => (
+      <section className="space-y-2 px-4 pb-4">
+        <h2 className="font-display text-sm font-bold uppercase tracking-wider text-muted">
+          IAP products
+        </h2>
+        {products.map((p) => {
+          const total = p.coins + p.bonusCoins;
+          return (
             <button
-              key={p.id}
+              key={p.productId}
               type="button"
-              onClick={() => setSelected(p.id)}
-              className={`flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-left ${
-                selected === p.id
-                  ? "border-cyan/50 bg-cyan/10 shadow-[0_0_20px_rgba(0,240,255,0.2)]"
+              onClick={() => setSelected(p.productId)}
+              className={`flex w-full items-center justify-between rounded-2xl border px-4 py-3 text-left ${
+                selected === p.productId
+                  ? "border-coral bg-coral/10"
                   : "border-line bg-ink-2"
               }`}
             >
-              <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-ink-3 text-gold">
-                <Sparkles className="h-4 w-4" />
-              </span>
-              <div className="min-w-0 flex-1">
-                <p className="font-display font-bold">
-                  {p.coins.toLocaleString()}
-                  {p.bonus ? ` +${p.bonus}` : ""} coins
+              <div>
+                <p className="font-display font-bold">{p.title}</p>
+                <p className="text-[11px] text-muted">
+                  {total.toLocaleString()} coins · {p.productId}
                 </p>
-                <p className="text-[11px] text-muted">{p.sku}</p>
               </div>
-              <span className="font-display font-extrabold text-cyan">
+              <span className="font-display text-lg font-extrabold text-cyan">
                 {p.priceLabel}
               </span>
             </button>
-          ))}
-        </div>
+          );
+        })}
+      </section>
 
+      <section className="px-4 pb-10">
         <button
           type="button"
           disabled={!pack || buying}
           onClick={() => void buyWithStore()}
-          className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-coral py-3.5 text-sm font-bold text-white shadow-[0_10px_40px_var(--glow)] disabled:opacity-50"
+          className="flex w-full items-center justify-center gap-2 rounded-full bg-coral py-4 text-sm font-bold text-white shadow-[0_0_28px_rgba(255,42,122,0.4)] disabled:opacity-50"
         >
-          <Play className="h-4 w-4 fill-current" />
-          {buying ? "Processing…" : `Buy with Play / App Store`}
+          <Store className="h-4 w-4" />
+          {buying ? "Processing…" : "Buy with Play / App Store"}
         </button>
-        {isPremium && (
-          <p className="mt-2 text-center text-[11px] text-gold">
-            VIP active · pack bonuses apply after server verify
-          </p>
-        )}
-      </section>
-
-      <section className="px-4 pb-10">
-        <Link
-          href="/premium"
-          className="block rounded-2xl border border-gold/30 bg-gold/10 px-4 py-4 text-center text-sm font-bold text-gold"
-        >
-          Upgrade VIP Premium
-        </Link>
+        <p className="mt-3 flex items-center justify-center gap-1.5 text-center text-[11px] text-muted">
+          <Play className="h-3 w-3" />
+          Server verifies receipt before crediting coins
+        </p>
       </section>
     </main>
   );

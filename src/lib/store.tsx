@@ -1,5 +1,10 @@
 "use client";
 
+/**
+ * Production App store — balances come from CoinCall `/wallet/*` APIs.
+ * No hardcoded coin / XP defaults.
+ */
+
 import {
   createContext,
   useCallback,
@@ -12,23 +17,17 @@ import {
 } from "react";
 import { vipTierFromXp, type VipTier } from "@/lib/ledger";
 import {
-  connectRealtime,
-  subscribeRealtime,
-} from "@/services/realtime";
-import {
-  fetchWallet,
-  getSessionToken,
-  setSessionToken,
+  fetchOrCreateWallet,
+  getDeviceUserId,
   spendCoinsApi,
-  type UserWallet,
-} from "@/services/walletApi";
+} from "@/lib/walletApi";
+import { getRealtimeClient } from "@/lib/realtime/websocket";
 
 type Toast = { id: number; text: string };
 
 type AppStore = {
   ready: boolean;
   userId: string;
-  displayName: string;
   coins: number;
   xp: number;
   vipTier: VipTier;
@@ -37,8 +36,8 @@ type AppStore = {
   toasts: Toast[];
   spend: (amount: number, label?: string) => boolean;
   spendAsync: (amount: number, label?: string) => Promise<boolean>;
-  hydrateWallet: (wallet: UserWallet) => void;
   addCoins: (amount: number, label?: string) => void;
+  syncWallet: () => Promise<void>;
   addXp: (amount: number) => void;
   toggleFollow: (id: string) => void;
   setPremium: (v: boolean) => void;
@@ -51,23 +50,13 @@ type AppStore = {
   entranceReady: boolean;
   triggerEntranceBlast: () => void;
   clearEntranceBlast: () => void;
-  refreshWallet: () => Promise<void>;
 };
 
 const Ctx = createContext<AppStore | null>(null);
 
-function ensureGuestToken(): string {
-  const existing = getSessionToken();
-  if (existing) return existing;
-  const guest = `guest_${Math.random().toString(36).slice(2)}_${Date.now()}`;
-  setSessionToken(guest);
-  return guest;
-}
-
 export function AppProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [userId, setUserId] = useState("");
-  const [displayName, setDisplayName] = useState("Luma Fan");
   const [coins, setCoins] = useState(0);
   const [xp, setXp] = useState(0);
   const [isPremium, setPremium] = useState(false);
@@ -77,7 +66,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [topUpGrace, setTopUpGrace] = useState(15);
   const [entranceBlast, setEntranceBlast] = useState(false);
   const [entranceReady, setEntranceReady] = useState(false);
-  const graceTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const graceRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const vipTier = useMemo(() => vipTierFromXp(xp), [xp]);
 
@@ -89,69 +78,75 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 2400);
   }, []);
 
-  const hydrateWallet = useCallback((wallet: UserWallet) => {
+  const syncWallet = useCallback(async () => {
+    const wallet = await fetchOrCreateWallet();
     setUserId(wallet.userId);
-    setDisplayName(wallet.displayName);
-    setCoins(wallet.coins);
+    setCoins(wallet.coinBalance);
     setXp(wallet.xp);
     setPremium(wallet.isPremium);
-    setFollowing(wallet.following ?? []);
   }, []);
-
-  const refreshWallet = useCallback(async () => {
-    const token = ensureGuestToken();
-    try {
-      const wallet = await fetchWallet(token);
-      hydrateWallet(wallet);
-    } catch {
-      // API cold start — keep last known; surface once ready fails softly
-      pushToast("Wallet sync pending — reconnecting…");
-    } finally {
-      setReady(true);
-      setEntranceReady(true);
-    }
-  }, [hydrateWallet, pushToast]);
 
   useEffect(() => {
-    const token = ensureGuestToken();
-    void refreshWallet();
-    connectRealtime(token);
-    const unsub = subscribeRealtime((ev) => {
-      if (ev.type === "wallet_updated") {
-        setCoins(ev.coins);
-        setXp(ev.xp);
+    let cancelled = false;
+    let unsub: (() => void) | undefined;
+
+    (async () => {
+      try {
+        const id = getDeviceUserId();
+        if (cancelled) return;
+        setUserId(id);
+        await syncWallet();
+        if (cancelled) return;
+        setReady(true);
+        setEntranceReady(true);
+
+        const rt = getRealtimeClient(id);
+        rt.connect();
+        unsub = rt.subscribe((ev) => {
+          if (ev.type === "wallet:updated" && ev.payload.userId === id) {
+            setCoins(ev.payload.coinBalance);
+            setXp(ev.payload.xp);
+          }
+        });
+      } catch (e) {
+        if (!cancelled) {
+          pushToast(
+            e instanceof Error
+              ? e.message
+              : "Wallet API unreachable — check NEXT_PUBLIC_API_BASE_URL",
+          );
+          setReady(true);
+        }
       }
-    });
+    })();
+
     return () => {
-      unsub();
+      cancelled = true;
+      unsub?.();
+      if (graceRef.current) clearInterval(graceRef.current);
     };
-  }, [refreshWallet]);
+  }, [pushToast, syncWallet]);
 
-  const clearEntranceBlast = useCallback(() => {
-    setEntranceBlast(false);
-  }, []);
-
-  const triggerEntranceBlast = useCallback(() => {
-    setEntranceBlast(true);
-  }, []);
+  const clearEntranceBlast = useCallback(() => setEntranceBlast(false), []);
+  const triggerEntranceBlast = useCallback(() => setEntranceBlast(true), []);
 
   const closeTopUp = useCallback(() => {
     setTopUpOpen(false);
-    if (graceTimer.current) {
-      clearInterval(graceTimer.current);
-      graceTimer.current = null;
+    if (graceRef.current) {
+      clearInterval(graceRef.current);
+      graceRef.current = null;
     }
   }, []);
 
   const openTopUp = useCallback((grace = 15) => {
     setTopUpGrace(grace);
     setTopUpOpen(true);
-    if (graceTimer.current) clearInterval(graceTimer.current);
-    graceTimer.current = setInterval(() => {
+    if (graceRef.current) clearInterval(graceRef.current);
+    graceRef.current = setInterval(() => {
       setTopUpGrace((g) => {
         if (g <= 1) {
-          if (graceTimer.current) clearInterval(graceTimer.current);
-          graceTimer.current = null;
+          if (graceRef.current) clearInterval(graceRef.current);
+          graceRef.current = null;
           return 0;
         }
         return g - 1;
@@ -163,47 +158,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setXp((x) => x + amount);
   }, []);
 
-  /** Optimistic local gate + authoritative server spend */
   const spendAsync = useCallback(
     async (amount: number, label?: string) => {
-      if (coins < amount) {
-        openTopUp(15);
-        pushToast("Low coins — recharge required");
-        return false;
-      }
       try {
-        const wallet = await spendCoinsApi(
+        const wallet = await spendCoinsApi({
           amount,
-          label || "spend",
-          getSessionToken(),
-        );
-        hydrateWallet(wallet);
+          reason: label || "spend",
+        });
+        setCoins(wallet.coinBalance);
+        setXp(wallet.xp);
         if (label) pushToast(label);
         return true;
-      } catch (e: unknown) {
+      } catch {
         openTopUp(15);
-        pushToast(e instanceof Error ? e.message : "Spend failed");
-        void refreshWallet();
+        pushToast("Not enough coins — recharge required");
         return false;
       }
     },
-    [coins, hydrateWallet, openTopUp, pushToast, refreshWallet],
+    [openTopUp, pushToast],
   );
 
   const spend = useCallback(
     (amount: number, label?: string) => {
       if (coins < amount) {
         openTopUp(15);
-        pushToast("Low coins — recharge required");
+        pushToast("Not enough coins — recharge required");
         return false;
       }
-      // Fire-and-forget server sync; UI stays snappy
-      void spendAsync(amount, label);
       setCoins((c) => c - amount);
       setXp((x) => x + amount);
+      void spendCoinsApi({ amount, reason: label || "spend" }).catch(() => {
+        void syncWallet();
+        openTopUp(15);
+      });
+      if (label) pushToast(label);
       return true;
     },
-    [coins, openTopUp, pushToast, spendAsync],
+    [coins, openTopUp, pushToast, syncWallet],
   );
 
   const addCoins = useCallback(
@@ -211,9 +202,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setCoins((c) => c + amount);
       if (label) pushToast(label);
       closeTopUp();
-      void refreshWallet();
+      void syncWallet();
     },
-    [closeTopUp, pushToast, refreshWallet],
+    [closeTopUp, pushToast, syncWallet],
   );
 
   const toggleFollow = useCallback((id: string) => {
@@ -226,7 +217,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
     () => ({
       ready,
       userId,
-      displayName,
       coins,
       xp,
       vipTier,
@@ -235,8 +225,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toasts,
       spend,
       spendAsync,
-      hydrateWallet,
       addCoins,
+      syncWallet,
       addXp,
       toggleFollow,
       setPremium,
@@ -249,12 +239,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entranceReady,
       triggerEntranceBlast,
       clearEntranceBlast,
-      refreshWallet,
     }),
     [
       ready,
       userId,
-      displayName,
       coins,
       xp,
       vipTier,
@@ -263,8 +251,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       toasts,
       spend,
       spendAsync,
-      hydrateWallet,
       addCoins,
+      syncWallet,
       addXp,
       toggleFollow,
       pushToast,
@@ -276,7 +264,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entranceReady,
       triggerEntranceBlast,
       clearEntranceBlast,
-      refreshWallet,
     ],
   );
 
