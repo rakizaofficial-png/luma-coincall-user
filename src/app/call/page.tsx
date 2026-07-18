@@ -72,8 +72,8 @@ export default function CallLobbyPage() {
           <span className="flex items-center gap-1.5 font-semibold">
             <Wifi className="h-3.5 w-3.5" />
             {apiOk
-              ? `Bridge online · ${liveHosts.length} host${liveHosts.length === 1 ? "" : "s"}`
-              : "Bridge offline — start CoinCall API :4000"}
+              ? `Live hosts · ${liveHosts.length}`
+              : "Waiting for CoinCall API…"}
           </span>
           <button
             type="button"
