@@ -1,11 +1,7 @@
 "use client";
 
-import { SwipeFeed } from "@/components/SwipeFeed";
+import { HomeScreen } from "@/components/home/HomeScreen";
 
-export default function DiscoverPage() {
-  return (
-    <main className="!pb-0">
-      <SwipeFeed />
-    </main>
-  );
+export default function HomePage() {
+  return <HomeScreen />;
 }

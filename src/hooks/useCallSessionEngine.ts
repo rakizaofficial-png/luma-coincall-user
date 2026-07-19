@@ -122,11 +122,14 @@ export function useCallSessionEngine(opts: {
           if (cancelledRef.current) return;
 
           setStatusText(`Ringing ${host.name}…`);
-          const userId = `luma_${Math.random().toString(36).slice(2, 9)}`;
+          const { getDeviceUserId } = await import("@/lib/walletApi");
+          const { getLocalProfile } = await import("@/lib/userProfile");
+          const profile = getLocalProfile();
           const call = await createCall({
             hostId: host.id,
-            userId,
-            userName: "Luma Fan",
+            userId: getDeviceUserId() || profile.userId,
+            userName: profile.displayName,
+            userAvatar: profile.avatarUrl,
           });
           if (cancelledRef.current) return;
           callIdRef.current = call.id;

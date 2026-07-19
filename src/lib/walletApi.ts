@@ -4,7 +4,12 @@
  * =============================================================================
  */
 
-import { apiConfig, requireApiBase } from "@/config/apiConfig";
+import { requireApiBase } from "@/config/apiConfig";
+import {
+  ensureDeviceUserId,
+  ensureLocalProfile,
+  updateLocalDisplayName,
+} from "@/lib/userProfile";
 
 export type WalletSnapshot = {
   userId: string;
@@ -13,21 +18,11 @@ export type WalletSnapshot = {
   isPremium: boolean;
   displayName: string;
   avatarUrl?: string;
+  created?: boolean;
 };
 
 function deviceUserId(): string {
-  if (typeof window === "undefined") return "server";
-  try {
-    const key = apiConfig.deviceUserKey;
-    let id = localStorage.getItem(key);
-    if (!id) {
-      id = `luma_${crypto.randomUUID()}`;
-      localStorage.setItem(key, id);
-    }
-    return id;
-  } catch {
-    return `luma_${Date.now()}`;
-  }
+  return ensureDeviceUserId();
 }
 
 export function getDeviceUserId() {
@@ -50,12 +45,43 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-/** Ensure user row exists server-side; returns live wallet */
+/**
+ * Auto-create local + server profile/wallet for this device user id.
+ * Purchases and spends always use the same id.
+ */
 export async function fetchOrCreateWallet(): Promise<WalletSnapshot> {
-  const userId = deviceUserId();
+  const local = ensureLocalProfile();
+  const data = await api<{ wallet: WalletSnapshot; created?: boolean }>(
+    "/wallet/me",
+    {
+      method: "POST",
+      body: JSON.stringify({
+        userId: local.userId,
+        displayName: local.displayName,
+        avatarUrl: local.avatarUrl,
+      }),
+    },
+  );
+  const wallet = data.wallet;
+  if (wallet.displayName && wallet.displayName !== local.displayName) {
+    updateLocalDisplayName(wallet.displayName);
+  }
+  return { ...wallet, created: Boolean(data.created) };
+}
+
+/** Update display name on device + server (same userId) */
+export async function updateProfileName(
+  displayName: string,
+): Promise<WalletSnapshot> {
+  const local = updateLocalDisplayName(displayName);
   const data = await api<{ wallet: WalletSnapshot }>("/wallet/me", {
     method: "POST",
-    body: JSON.stringify({ userId, displayName: "Luma Fan" }),
+    body: JSON.stringify({
+      userId: local.userId,
+      displayName: local.displayName,
+      avatarUrl: local.avatarUrl,
+      updateProfile: true,
+    }),
   });
   return data.wallet;
 }
@@ -82,6 +108,59 @@ export async function spendCoinsApi(input: {
       amount: input.amount,
       reason: input.reason,
       meta: input.meta,
+    }),
+  });
+  return data.wallet;
+}
+
+/** Credit coins (rewards, check-in, spin, referral) — server authoritative */
+export async function creditCoinsApi(input: {
+  amount: number;
+  reason: string;
+}): Promise<WalletSnapshot> {
+  const userId = deviceUserId();
+  const data = await api<{ wallet: WalletSnapshot }>("/wallet/credit", {
+    method: "POST",
+    body: JSON.stringify({
+      userId,
+      amount: input.amount,
+      reason: input.reason,
+    }),
+  });
+  return data.wallet;
+}
+
+export type WalletLedgerEntry = {
+  id: string;
+  amount: number;
+  reason: string;
+  kind: "credit" | "spend";
+  at: number;
+};
+
+export async function fetchWalletHistory(): Promise<WalletLedgerEntry[]> {
+  const userId = deviceUserId();
+  try {
+    const data = await api<{ history: WalletLedgerEntry[] }>(
+      `/wallet/history/${encodeURIComponent(userId)}`,
+    );
+    return data.history ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export async function setPremiumApi(input: {
+  isPremium: boolean;
+  planId?: string;
+}): Promise<WalletSnapshot> {
+  const userId = deviceUserId();
+  const data = await api<{ wallet: WalletSnapshot }>("/wallet/premium", {
+    method: "POST",
+    body: JSON.stringify({
+      userId,
+      isPremium: input.isPremium,
+      planId: input.planId,
     }),
   });
   return data.wallet;

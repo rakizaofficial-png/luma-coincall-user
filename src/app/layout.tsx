@@ -5,6 +5,7 @@ import { BottomNav } from "@/components/BottomNav";
 import { ToastHost } from "@/components/ToastHost";
 import { DiamondEntranceBlast } from "@/components/DiamondEntranceBlast";
 import { WelcomePushEngine } from "@/components/welcome/WelcomePushEngine";
+import { CoinBurstHost } from "@/components/engagement/CoinBurstHost";
 import "./globals.css";
 
 const syne = Syne({
@@ -20,9 +21,9 @@ const manrope = Manrope({
 });
 
 export const metadata: Metadata = {
-  title: "Luma — Live, 1v1 & Coins",
+  title: "Luma — Premium voice & video calling",
   description:
-    "User-side coin app for live streams, private 1v1 video calls, chat, VIP premium, and Play Store recharge.",
+    "Discover hosts, 1v1 calls, daily rewards, Lucky Spin, VIP, and coins — a premium live calling experience.",
 };
 
 export default function RootLayout({
@@ -36,6 +37,7 @@ export default function RootLayout({
         <AppProvider>
           <div className="phone-shell safe-bottom relative overflow-hidden">
             <DiamondEntranceBlast />
+            <CoinBurstHost />
             {children}
             <BottomNav />
             <ToastHost />

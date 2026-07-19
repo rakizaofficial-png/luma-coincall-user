@@ -11,7 +11,7 @@ export function WalletDiamond({ compact }: { compact?: boolean }) {
 
   return (
     <Link
-      href="/wallet"
+      href="/profile"
       className={`wallet-diamond relative flex items-center gap-1.5 rounded-full border border-cyan/40 bg-ink-3/90 ${
         compact ? "h-9 px-2.5" : "h-10 px-3"
       }`}

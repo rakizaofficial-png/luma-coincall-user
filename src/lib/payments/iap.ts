@@ -16,6 +16,7 @@
  */
 
 import { requireApiBase } from "@/config/apiConfig";
+import { getDeviceUserId } from "@/lib/walletApi";
 import { getIapProduct } from "./iapCatalog";
 
 export type IapPlatform = "google" | "apple" | "web";
@@ -29,10 +30,12 @@ export type VerifyIapResult = {
 
 async function apiJson<T>(path: string, init?: RequestInit): Promise<T> {
   const base = requireApiBase();
+  const userId = getDeviceUserId();
   const res = await fetch(`${base}${path}`, {
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "X-User-Id": userId,
       ...(init?.headers || {}),
     },
     cache: "no-store",
@@ -96,6 +99,10 @@ export async function purchaseCoins(input: {
   userId: string;
   productId: string;
 }): Promise<VerifyIapResult | { redirected: true; checkoutUrl: string }> {
+  /** Always credit the device profile id — never a random/temp id */
+  const userId = getDeviceUserId() || input.userId;
+  if (!userId) throw new Error("Profile not ready — reopen the app");
+
   const bridge = (
     window as unknown as {
       LumaNativeIap?: {
@@ -112,14 +119,17 @@ export async function purchaseCoins(input: {
     if (!product) throw new Error("Unknown product");
     const native = await bridge.purchase(product.platformSku.google);
     return verifyIapPurchase({
-      userId: input.userId,
+      userId,
       productId: input.productId,
       platform: native.platform,
       purchaseToken: native.purchaseToken,
     });
   }
 
-  const session = await createIapCheckoutSession(input);
+  const session = await createIapCheckoutSession({
+    userId,
+    productId: input.productId,
+  });
   window.location.href = session.checkoutUrl;
   return { redirected: true, checkoutUrl: session.checkoutUrl };
 }

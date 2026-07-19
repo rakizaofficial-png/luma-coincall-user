@@ -3,7 +3,7 @@
 import { use, useEffect, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   ArrowLeft,
@@ -11,14 +11,19 @@ import {
   Mic,
   MicOff,
   PhoneOff,
+  Signal,
   SwitchCamera,
   Video,
   VideoOff,
 } from "lucide-react";
+import { CallWaveform } from "@/components/call/CallWaveform";
+import { CoinDeductFlash } from "@/components/call/CoinDeductFlash";
 import { FakeLiveVideoPlayer } from "@/components/call/FakeLiveVideoPlayer";
+import { TrialPaywall } from "@/components/call/TrialPaywall";
 import { GiftSheet } from "@/components/GiftSheet";
 import { LowBalanceModal } from "@/components/LowBalanceModal";
 import { useCallSessionEngine } from "@/hooks/useCallSessionEngine";
+import { FREE_TRIAL_SECONDS } from "@/lib/engagement";
 import {
   setUserCameraOff,
   setUserMuted,
@@ -29,7 +34,7 @@ import { useApp } from "@/lib/store";
 
 /**
  * Active call UI — Agora live OR AI prerecorded fallback.
- * Coin ledger (10s slices) runs for BOTH transports identically.
+ * Coin ledger (10s slices) + one-time 30s free trial for new users.
  */
 export default function CallSessionClient({
   params,
@@ -38,9 +43,31 @@ export default function CallSessionClient({
 }) {
   const { id } = use(params);
   const search = useSearchParams();
+  const router = useRouter();
   const preferLiveBridge = search.get("live") === "1";
   const isBlur = search.get("blur") === "1";
-  const { spend, pushToast, isPremium, coins, openTopUp } = useApp();
+  const trialParam = search.get("trial") === "1";
+  const {
+    spend,
+    pushToast,
+    isPremium,
+    coins,
+    openTopUp,
+    freeTrialAvailable,
+    useFreeTrial,
+    endFreeTrial,
+    completeCallEngagement,
+    completeGiftEngagement,
+  } = useApp();
+
+  const [trialMode, setTrialMode] = useState(false);
+
+  useEffect(() => {
+    if (trialParam && freeTrialAvailable && useFreeTrial()) {
+      setTrialMode(true);
+      pushToast("Free 30s trial started");
+    }
+  }, [trialParam, freeTrialAvailable, useFreeTrial, pushToast]);
 
   const engine = useCallSessionEngine({
     hostId: id,
@@ -76,8 +103,13 @@ export default function CallSessionClient({
   const [blurReveal, setBlurReveal] = useState(isBlur ? 0.08 : 1);
   const [lowBalance, setLowBalance] = useState(false);
   const [graceLeft, setGraceLeft] = useState(15);
+  const [trialPaywall, setTrialPaywall] = useState(false);
+  const [deductFlash, setDeductFlash] = useState<number | null>(null);
+  const [netQuality] = useState<"Excellent" | "Good" | "Fair">("Good");
   const graceRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const hangUpRef = useRef<() => Promise<void>>(async () => undefined);
+  const trialEndedRef = useRef(false);
+  const billingPausedRef = useRef(false);
 
   const rate = isBlur
     ? Math.round(effectiveRate(ratePerMinute, isPremium) * 0.5)
@@ -91,17 +123,33 @@ export default function CallSessionClient({
   const hangUp = async () => {
     await disconnect();
     await stopUserAgoraCall();
+    if (isConnected) void completeCallEngagement();
     pushToast("Call ended");
   };
   hangUpRef.current = hangUp;
 
-  // Dynamic 10-second coin deduction — identical for Agora + AI fallback
   useEffect(() => {
     if (!isConnected) return;
 
     const tick = setInterval(() => {
       setSecs((s) => {
         const next = s + 1;
+
+        if (trialMode && !trialEndedRef.current && next >= FREE_TRIAL_SECONDS) {
+          trialEndedRef.current = true;
+          billingPausedRef.current = true;
+          endFreeTrial();
+          setTrialMode(false);
+          setTrialPaywall(true);
+          if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+            navigator.vibrate?.(40);
+          }
+          return next;
+        }
+
+        if (trialMode || billingPausedRef.current) {
+          return next;
+        }
 
         if (isBlur && next % 10 === 0) {
           setBlurReveal((b) => Math.min(1, b + 0.12));
@@ -110,6 +158,11 @@ export default function CallSessionClient({
         if (next > 0 && next % 10 === 0) {
           const cost = sliceCost(rate);
           const ok = spend(cost, `−${cost} coins · 10s`);
+          setDeductFlash(cost);
+          setTimeout(() => setDeductFlash(null), 900);
+          if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+            navigator.vibrate?.(12);
+          }
           if (!ok) {
             setLowBalance(true);
             setGraceLeft(15);
@@ -147,10 +200,21 @@ export default function CallSessionClient({
         graceRef.current = null;
       }
     };
-  }, [isBlur, isConnected, rate, spend, pushToast, lowBalance, openTopUp]);
+  }, [
+    isBlur,
+    isConnected,
+    rate,
+    spend,
+    pushToast,
+    lowBalance,
+    openTopUp,
+    trialMode,
+    endFreeTrial,
+  ]);
 
   const mm = String(Math.floor(secs / 60)).padStart(2, "0");
   const ss = String(secs % 60).padStart(2, "0");
+  const trialLeft = Math.max(0, FREE_TRIAL_SECONDS - secs);
 
   const clearBlur = () => {
     if (!isBlur || blurReveal >= 1) return;
@@ -161,7 +225,6 @@ export default function CallSessionClient({
 
   return (
     <main className="relative min-h-dvh overflow-hidden bg-[#06040b]">
-      {/* AI fake-live full-screen player (no chrome) */}
       {isAi && aiHost && (
         <FakeLiveVideoPlayer
           aiHost={aiHost}
@@ -170,7 +233,6 @@ export default function CallSessionClient({
         />
       )}
 
-      {/* Avatar backdrop while routing / ringing / failed */}
       {!isConnected && (
         <Image
           src={displayAvatar}
@@ -200,10 +262,12 @@ export default function CallSessionClient({
             Connecting to Host…
           </p>
           <p className="mt-1 text-xs text-gold/80">{statusText}</p>
+          <div className="mt-6">
+            <CallWaveform active />
+          </div>
         </div>
       )}
 
-      {/* Agora remote surface — only for live transport */}
       <div
         ref={remoteRef}
         id="agora-remote"
@@ -223,6 +287,8 @@ export default function CallSessionClient({
         />
       )}
       <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-b from-black/55 via-transparent to-black/85" />
+
+      <CoinDeductFlash amount={deductFlash} />
 
       <motion.div
         initial={{ opacity: 0, scale: 0.9 }}
@@ -257,36 +323,62 @@ export default function CallSessionClient({
           </Link>
           <div className="rounded-full bg-black/45 px-3 py-1.5 text-center backdrop-blur">
             <p className="text-xs font-bold">
-              {isRinging
-                ? "Connecting…"
-                : isConnected
-                  ? isAi
-                    ? "Private 1v1"
-                    : "Private 1v1 · Live"
-                  : isFailed
-                    ? "Failed"
-                    : "1v1"}
+              {trialMode
+                ? "Free trial"
+                : isRinging
+                  ? "Connecting…"
+                  : isConnected
+                    ? isAi
+                      ? "Private 1v1"
+                      : "Private 1v1 · Live"
+                    : isFailed
+                      ? "Failed"
+                      : "1v1"}
             </p>
             <p className="font-mono text-sm tabular-nums text-gold">
               {mm}:{ss}
+              {trialMode ? ` · ${trialLeft}s left` : ""}
             </p>
           </div>
           <button
             type="button"
-            onClick={() => setGiftOpen(true)}
+            onClick={() => {
+              setGiftOpen(true);
+            }}
             className="rounded-full bg-coral p-2 shadow-[0_0_20px_var(--glow)]"
           >
             <Gift className="h-5 w-5" />
           </button>
         </div>
 
-        <div className="mt-8 text-center">
+        <div className="mt-6 flex flex-col items-center text-center">
+          {isConnected ? (
+            <div className="relative mb-4">
+              <Image
+                src={displayAvatar}
+                alt=""
+                width={96}
+                height={96}
+                className="h-24 w-24 rounded-full object-cover ring-4 ring-coral/40"
+              />
+              <span className="online-pulse absolute bottom-1 right-1 h-4 w-4 rounded-full border-2 border-ink bg-teal" />
+            </div>
+          ) : null}
           <h1 className="font-display text-3xl font-extrabold">{displayName}</h1>
           <p className="mt-1 text-sm text-white/70">
-            {rate} coins/min
-            {isBlur ? " · Blind 50% off" : isPremium ? " · VIP −15%" : ""} ·{" "}
-            {coins} coins left
+            {trialMode
+              ? "Complimentary intro · no coins yet"
+              : `${rate} coins/min${isBlur ? " · Blind 50% off" : isPremium ? " · VIP −15%" : ""} · ${coins} coins left`}
           </p>
+          <div className="mt-3 flex items-center gap-1.5 text-[11px] text-cyan">
+            <Signal className="h-3.5 w-3.5" />
+            Network {netQuality}
+          </div>
+          {isConnected ? (
+            <div className="mt-4">
+              <CallWaveform active={!muted} />
+            </div>
+          ) : null}
           <p className="mt-3 text-sm text-white/80">{statusText}</p>
           {isBlur && blurReveal < 1 && isConnected && (
             <button
@@ -307,6 +399,9 @@ export default function CallSessionClient({
                 setMuted((m) => {
                   const next = !m;
                   if (!isAi) void setUserMuted(next);
+                  if (typeof navigator !== "undefined" && "vibrate" in navigator) {
+                    navigator.vibrate?.(8);
+                  }
                   return next;
                 });
               }}
@@ -353,12 +448,33 @@ export default function CallSessionClient({
         </div>
       </div>
 
-      <GiftSheet open={giftOpen} onClose={() => setGiftOpen(false)} />
+      <GiftSheet
+        open={giftOpen}
+        onClose={() => setGiftOpen(false)}
+        onSent={() => {
+          void completeGiftEngagement();
+        }}
+      />
       <LowBalanceModal
         open={lowBalance}
         graceLeft={graceLeft}
         onDismiss={() => setLowBalance(false)}
         minuteRate={rate}
+      />
+      <TrialPaywall
+        open={trialPaywall}
+        hostName={displayName}
+        onContinueWithCoins={() => {
+          billingPausedRef.current = false;
+          setTrialPaywall(false);
+          trialEndedRef.current = true;
+        }}
+        onClose={() => {
+          billingPausedRef.current = false;
+          setTrialPaywall(false);
+          void hangUp();
+          router.push("/call");
+        }}
       />
     </main>
   );

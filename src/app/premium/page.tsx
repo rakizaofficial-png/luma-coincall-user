@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
@@ -10,6 +11,7 @@ import {
   Heart,
   Shield,
   Sparkles,
+  Timer,
   Video,
   Zap,
 } from "lucide-react";
@@ -38,54 +40,84 @@ const plans = [
     price: "$79.99",
     period: "/ year",
     coins: 12000,
-    tag: "Best value",
+    tag: "Best Value",
   },
 ];
 
 const perks = [
   {
     icon: Video,
-    title: "Half-price instant match",
-    desc: "Random 1v1 matches cost 30 coins instead of 60",
+    title: "Unlimited matching",
+    desc: "Priority queue when hosts are busy",
+  },
+  {
+    icon: Zap,
+    title: "Faster connection",
+    desc: "Skip the wait — ring hosts first",
   },
   {
     icon: Coins,
-    title: "15% off every call minute",
-    desc: "Private video bills cheaper — talk longer",
+    title: "Extra free coins",
+    desc: "Welcome pack + cheaper call minutes (−15%)",
   },
   {
     icon: Sparkles,
-    title: "VIP Flex XP · Silver → Gold → Diamond",
-    desc: "Spend coins to climb tiers, unlock borders & entrance FX",
+    title: "Premium hosts",
+    desc: "Access VIP-only creators and badges",
   },
   {
     icon: BadgeCheck,
-    title: "VIP badge & frame",
-    desc: "Stand out in live rooms and chat lists",
+    title: "Exclusive badges",
+    desc: "VIP frame in live rooms and chat",
   },
   {
     icon: Heart,
-    title: "Priority matching",
-    desc: "Skip the queue when creators are busy",
+    title: "Priority calls",
+    desc: "Half-price instant match (30 vs 60)",
   },
   {
     icon: Shield,
-    title: "Blind Match discount",
-    desc: "Blur-reveal calls at 50% off the per-minute rate",
+    title: "VIP support",
+    desc: "Faster help when something goes wrong",
   },
 ];
 
-export default function PremiumPage() {
-  const { isPremium, setPremium, addCoins, pushToast, xp, vipTier } = useApp();
+function useOfferCountdown(hours = 6) {
+  const [left, setLeft] = useState(hours * 3600);
+  useEffect(() => {
+    const key = "luma_vip_offer_deadline";
+    let deadline = Number(localStorage.getItem(key) || 0);
+    const now = Date.now();
+    if (!deadline || deadline < now) {
+      deadline = now + hours * 3600 * 1000;
+      localStorage.setItem(key, String(deadline));
+    }
+    const tick = () =>
+      setLeft(Math.max(0, Math.floor((deadline - Date.now()) / 1000)));
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [hours]);
+  const h = String(Math.floor(left / 3600)).padStart(2, "0");
+  const m = String(Math.floor((left % 3600) / 60)).padStart(2, "0");
+  const s = String(left % 60).padStart(2, "0");
+  return `${h}:${m}:${s}`;
+}
 
-  const subscribe = (planId: string) => {
+export default function PremiumPage() {
+  const { isPremium, activatePremium, pushToast, xp, vipTier } = useApp();
+  const [busy, setBusy] = useState<string | null>(null);
+  const countdown = useOfferCountdown(6);
+
+  const subscribe = async (planId: string) => {
     const plan = plans.find((p) => p.id === planId)!;
-    pushToast("Opening Google Play subscription…");
-    setTimeout(() => {
-      setPremium(true);
-      addCoins(plan.coins, `VIP activated · +${plan.coins} welcome coins`);
-      pushToast("Welcome to Luma VIP 👑");
-    }, 1100);
+    setBusy(planId);
+    pushToast("Activating VIP…");
+    try {
+      await activatePremium(plan.id, plan.coins);
+    } finally {
+      setBusy(null);
+    }
   };
 
   return (
@@ -117,17 +149,22 @@ export default function PremiumPage() {
             <Crown className="h-28 w-28 text-gold" />
           </div>
           <p className="relative flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-gold">
-            <Zap className="h-3.5 w-3.5" /> Unlock more moments
+            <Zap className="h-3.5 w-3.5" /> Limited-time offer
           </p>
           <h2 className="relative mt-2 font-display text-3xl font-extrabold leading-tight">
             Talk longer.
             <br />
-            Gift bigger.
+            Connect faster.
           </h2>
           <p className="relative mt-2 max-w-[17rem] text-sm text-muted">
-            VIP is built for fans — cheaper matches, call discounts, and XP tiers
-            (Silver · Gold · Diamond). Your XP: {xp} · {vipTier}
+            Unlimited matching, priority calls, premium hosts, extra coins, and
+            VIP support. XP {xp} · {vipTier}
           </p>
+          {!isPremium ? (
+            <p className="relative mt-4 inline-flex items-center gap-1.5 rounded-full bg-black/35 px-3 py-1.5 text-xs font-bold text-gold backdrop-blur">
+              <Timer className="h-3.5 w-3.5" /> Ends in {countdown}
+            </p>
+          ) : null}
         </motion.div>
       </section>
 
@@ -139,7 +176,7 @@ export default function PremiumPage() {
               You’re on Luma VIP
             </p>
             <p className="mt-1 text-sm text-muted">
-              Enjoy discounted calls, priority match, and double check-ins.
+              Enjoy discounted calls, priority match, and exclusive badges.
             </p>
             <Link
               href="/call"
@@ -155,20 +192,23 @@ export default function PremiumPage() {
             <motion.button
               key={plan.id}
               type="button"
+              disabled={busy !== null}
               initial={{ opacity: 0, x: -10 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: i * 0.06 }}
-              onClick={() => subscribe(plan.id)}
-              className={`relative flex w-full items-center gap-3 rounded-2xl border px-4 py-4 text-left ${
+              onClick={() => void subscribe(plan.id)}
+              className={`relative flex w-full items-center gap-3 rounded-2xl border px-4 py-4 text-left disabled:opacity-60 ${
                 plan.tag === "Most popular"
                   ? "border-coral bg-coral/10"
-                  : "border-line bg-ink-2"
+                  : plan.tag === "Best Value"
+                    ? "border-gold/50 bg-gold/10"
+                    : "border-line bg-ink-2"
               }`}
             >
               {plan.tag && (
                 <span
                   className={`absolute -top-2 right-4 rounded-full px-2 py-0.5 text-[9px] font-bold ${
-                    plan.tag === "Best value"
+                    plan.tag === "Best Value"
                       ? "bg-gold text-ink"
                       : "bg-coral text-white"
                   }`}
@@ -182,19 +222,19 @@ export default function PremiumPage() {
               <div className="min-w-0 flex-1">
                 <p className="font-display font-bold">{plan.name}</p>
                 <p className="text-xs text-muted">
-                  +{plan.coins.toLocaleString()} welcome coins · Play Store
+                  +{plan.coins.toLocaleString()} welcome coins
                 </p>
               </div>
               <div className="text-right">
                 <p className="font-display text-lg font-extrabold">
-                  {plan.price}
+                  {busy === plan.id ? "…" : plan.price}
                 </p>
                 <p className="text-[10px] text-muted">{plan.period}</p>
               </div>
             </motion.button>
           ))}
           <p className="pt-1 text-center text-[11px] text-muted">
-            Auto-renews via Google Play · cancel anytime in Play subscriptions
+            Transparent pricing · cancel anytime in store subscriptions
           </p>
         </section>
       )}
@@ -215,7 +255,7 @@ export default function PremiumPage() {
                 className="flex gap-3 rounded-2xl border border-line bg-ink-2/80 px-3.5 py-3"
               >
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-ink-3 text-coral">
-                  <Icon className="h-4.5 w-4.5 h-4 w-4" />
+                  <Icon className="h-4 w-4" />
                 </span>
                 <div>
                   <p className="text-sm font-bold">{perk.title}</p>

@@ -2,15 +2,15 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, Radio, Video, MessageCircle, Wallet } from "lucide-react";
+import { Home, Radio, Video, MessageCircle, UserRound } from "lucide-react";
 import { motion } from "framer-motion";
 
 const tabs = [
-  { href: "/", label: "Discover", icon: Home },
+  { href: "/", label: "Home", icon: Home },
   { href: "/live", label: "Live", icon: Radio },
-  { href: "/call", label: "1v1", icon: Video },
+  { href: "/call", label: "Calling", icon: Video },
   { href: "/messages", label: "Chat", icon: MessageCircle },
-  { href: "/wallet", label: "Coins", icon: Wallet },
+  { href: "/profile", label: "Profile", icon: UserRound },
 ];
 
 export function BottomNav() {
@@ -18,8 +18,10 @@ export function BottomNav() {
   const hide =
     pathname.startsWith("/live/") ||
     pathname.startsWith("/call/") ||
+    pathname === "/match" ||
     pathname.startsWith("/messages/") ||
     pathname.startsWith("/party/") ||
+    pathname.startsWith("/feed") ||
     pathname === "/premium";
 
   if (hide) return null;
@@ -31,7 +33,11 @@ export function BottomNav() {
           const active =
             tab.href === "/"
               ? pathname === "/"
-              : pathname.startsWith(tab.href);
+              : tab.href === "/profile"
+                ? pathname.startsWith("/profile") ||
+                  pathname.startsWith("/wallet") ||
+                  pathname.startsWith("/rewards")
+                : pathname.startsWith(tab.href);
           const Icon = tab.icon;
           return (
             <li key={tab.href}>
@@ -50,7 +56,11 @@ export function BottomNav() {
                   className={`relative h-5 w-5 ${active ? "text-coral" : "text-muted"}`}
                   strokeWidth={active ? 2.4 : 1.8}
                 />
-                <span className={active ? "relative text-sand" : "relative text-muted"}>
+                <span
+                  className={
+                    active ? "relative text-sand" : "relative text-muted"
+                  }
+                >
                   {tab.label}
                 </span>
               </Link>

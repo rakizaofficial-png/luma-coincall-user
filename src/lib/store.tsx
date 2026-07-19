@@ -1,8 +1,7 @@
 "use client";
 
 /**
- * Production App store — balances come from CoinCall `/wallet/*` APIs.
- * No hardcoded coin / XP defaults.
+ * Production App store — wallet from CoinCall APIs + local engagement engine.
  */
 
 import {
@@ -17,10 +16,40 @@ import {
 } from "react";
 import { vipTierFromXp, type VipTier } from "@/lib/ledger";
 import {
+  claimDailyCheckIn,
+  claimMission,
+  claimReferral,
+  markFreeTrialUsed,
+  markVipJoined,
+  progressMission,
+  recordCallComplete,
+  recordFollow,
+  recordGiftSent,
+  recordLiveWatch,
+  recordOpenApp,
+  setFreeTrialActive,
+  setNotifyOptIn,
+  spinLuckyWheel,
+  canUseFreeTrial,
+  getEngagement,
+  nextCheckInReward,
+  spinsRemaining,
+  appendLocalHistory,
+  type EngagementState,
+  type MissionId,
+  type RewardResult,
+} from "@/lib/engagement";
+import {
+  creditCoinsApi,
   fetchOrCreateWallet,
-  getDeviceUserId,
+  setPremiumApi,
   spendCoinsApi,
+  updateProfileName,
 } from "@/lib/walletApi";
+import {
+  ensureLocalProfile,
+  updateLocalDisplayName,
+} from "@/lib/userProfile";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
 
 type Toast = { id: number; text: string };
@@ -28,19 +57,38 @@ type Toast = { id: number; text: string };
 type AppStore = {
   ready: boolean;
   userId: string;
+  displayName: string;
+  avatarUrl: string;
   coins: number;
   xp: number;
   vipTier: VipTier;
   isPremium: boolean;
   following: string[];
   toasts: Toast[];
+  engagement: EngagementState;
+  refreshEngagement: () => void;
+  claimCheckIn: () => Promise<RewardResult>;
+  doLuckySpin: () => Promise<RewardResult>;
+  claimWeeklyMission: (id: MissionId) => Promise<RewardResult>;
+  applyReferral: (code: string) => Promise<RewardResult>;
+  completeCallEngagement: () => Promise<void>;
+  completeGiftEngagement: () => Promise<void>;
+  completeFollowEngagement: (id: string) => void;
+  completeLiveWatch: () => void;
+  useFreeTrial: () => boolean;
+  endFreeTrial: () => void;
+  freeTrialAvailable: boolean;
+  enablePushOptIn: () => void;
   spend: (amount: number, label?: string) => boolean;
   spendAsync: (amount: number, label?: string) => Promise<boolean>;
   addCoins: (amount: number, label?: string) => void;
-  syncWallet: () => Promise<void>;
+  creditReward: (amount: number, label: string) => Promise<void>;
+  syncWallet: () => Promise<import("@/lib/walletApi").WalletSnapshot>;
+  updateDisplayName: (name: string) => Promise<void>;
   addXp: (amount: number) => void;
   toggleFollow: (id: string) => void;
   setPremium: (v: boolean) => void;
+  activatePremium: (planId: string, welcomeCoins: number) => Promise<void>;
   pushToast: (text: string) => void;
   topUpOpen: boolean;
   topUpGrace: number;
@@ -50,6 +98,8 @@ type AppStore = {
   entranceReady: boolean;
   triggerEntranceBlast: () => void;
   clearEntranceBlast: () => void;
+  coinBurst: number;
+  triggerCoinBurst: (amount: number) => void;
 };
 
 const Ctx = createContext<AppStore | null>(null);
@@ -57,6 +107,8 @@ const Ctx = createContext<AppStore | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [userId, setUserId] = useState("");
+  const [displayName, setDisplayName] = useState("Luma Fan");
+  const [avatarUrl, setAvatarUrl] = useState("");
   const [coins, setCoins] = useState(0);
   const [xp, setXp] = useState(0);
   const [isPremium, setPremium] = useState(false);
@@ -66,9 +118,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [topUpGrace, setTopUpGrace] = useState(15);
   const [entranceBlast, setEntranceBlast] = useState(false);
   const [entranceReady, setEntranceReady] = useState(false);
+  const [engagement, setEngagement] = useState<EngagementState>(() =>
+    typeof window === "undefined" ? getEngagement() : getEngagement(),
+  );
+  const [coinBurst, setCoinBurst] = useState(0);
   const graceRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const vipTier = useMemo(() => vipTierFromXp(xp), [xp]);
+  const freeTrialAvailable = !engagement.freeTrialUsed;
 
   const pushToast = useCallback((text: string) => {
     const id = Date.now();
@@ -78,13 +135,63 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }, 2400);
   }, []);
 
+  const triggerCoinBurst = useCallback((amount: number) => {
+    setCoinBurst(amount);
+    setTimeout(() => setCoinBurst(0), 1600);
+  }, []);
+
+  const refreshEngagement = useCallback(() => {
+    setEngagement(getEngagement());
+  }, []);
+
+  const creditReward = useCallback(
+    async (amount: number, label: string) => {
+      if (amount <= 0) return;
+      try {
+        const wallet = await creditCoinsApi({ amount, reason: label });
+        setCoins(wallet.coinBalance);
+        setXp(wallet.xp);
+        appendLocalHistory(amount, label, "credit");
+        refreshEngagement();
+        triggerCoinBurst(amount);
+        pushToast(label);
+      } catch {
+        setCoins((c) => c + amount);
+        appendLocalHistory(amount, label, "credit");
+        refreshEngagement();
+        triggerCoinBurst(amount);
+        pushToast(label);
+      }
+    },
+    [pushToast, refreshEngagement, triggerCoinBurst],
+  );
+
   const syncWallet = useCallback(async () => {
     const wallet = await fetchOrCreateWallet();
     setUserId(wallet.userId);
+    setDisplayName(wallet.displayName || ensureLocalProfile().displayName);
+    setAvatarUrl(wallet.avatarUrl || ensureLocalProfile().avatarUrl);
     setCoins(wallet.coinBalance);
     setXp(wallet.xp);
     setPremium(wallet.isPremium);
+    return wallet;
   }, []);
+
+  const updateDisplayName = useCallback(
+    async (name: string) => {
+      try {
+        const wallet = await updateProfileName(name);
+        setDisplayName(wallet.displayName);
+        if (wallet.avatarUrl) setAvatarUrl(wallet.avatarUrl);
+        pushToast("Profile updated");
+      } catch {
+        const local = updateLocalDisplayName(name);
+        setDisplayName(local.displayName);
+        pushToast("Saved on this device");
+      }
+    },
+    [pushToast],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -92,18 +199,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const id = getDeviceUserId();
+        const local = ensureLocalProfile();
         if (cancelled) return;
-        setUserId(id);
-        await syncWallet();
+        setUserId(local.userId);
+        setDisplayName(local.displayName);
+        setAvatarUrl(local.avatarUrl);
+        setEngagement(recordOpenApp());
+
+        const wallet = await syncWallet();
         if (cancelled) return;
         setReady(true);
         setEntranceReady(true);
 
-        const rt = getRealtimeClient(id);
+        if (wallet.created) {
+          pushToast("Profile created · +100 welcome coins");
+        }
+
+        const rt = getRealtimeClient(local.userId);
         rt.connect();
         unsub = rt.subscribe((ev) => {
-          if (ev.type === "wallet:updated" && ev.payload.userId === id) {
+          if (
+            ev.type === "wallet:updated" &&
+            ev.payload.userId === local.userId
+          ) {
             setCoins(ev.payload.coinBalance);
             setXp(ev.payload.xp);
           }
@@ -158,6 +276,77 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setXp((x) => x + amount);
   }, []);
 
+  const applyReward = useCallback(
+    async (result: RewardResult) => {
+      setEngagement(result.state);
+      if (result.coins > 0) {
+        await creditReward(result.coins, result.message);
+      } else if (result.message) {
+        pushToast(result.message);
+      }
+      if (result.xp > 0) addXp(result.xp);
+      return result;
+    },
+    [addXp, creditReward, pushToast],
+  );
+
+  const claimCheckIn = useCallback(async () => {
+    return applyReward(claimDailyCheckIn());
+  }, [applyReward]);
+
+  const doLuckySpin = useCallback(async () => {
+    return applyReward(spinLuckyWheel());
+  }, [applyReward]);
+
+  const claimWeeklyMission = useCallback(
+    async (id: MissionId) => {
+      return applyReward(claimMission(id));
+    },
+    [applyReward],
+  );
+
+  const applyReferral = useCallback(
+    async (code: string) => {
+      return applyReward(claimReferral(code));
+    },
+    [applyReward],
+  );
+
+  const completeCallEngagement = useCallback(async () => {
+    await applyReward(recordCallComplete());
+  }, [applyReward]);
+
+  const completeGiftEngagement = useCallback(async () => {
+    await applyReward(recordGiftSent());
+  }, [applyReward]);
+
+  const completeFollowEngagement = useCallback((id: string) => {
+    void id;
+    setEngagement(recordFollow());
+  }, []);
+
+  const completeLiveWatch = useCallback(() => {
+    setEngagement(recordLiveWatch());
+  }, []);
+
+  const useFreeTrial = useCallback(() => {
+    if (!canUseFreeTrial()) return false;
+    setEngagement(setFreeTrialActive(true));
+    return true;
+  }, []);
+
+  const endFreeTrial = useCallback(() => {
+    setEngagement(markFreeTrialUsed());
+  }, []);
+
+  const enablePushOptIn = useCallback(() => {
+    setEngagement(setNotifyOptIn(true));
+    pushToast("Daily reminders on — we’ll nudge you for rewards");
+    if (typeof window !== "undefined" && "Notification" in window) {
+      void Notification.requestPermission();
+    }
+  }, [pushToast]);
+
   const spendAsync = useCallback(
     async (amount: number, label?: string) => {
       try {
@@ -167,6 +356,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
         setCoins(wallet.coinBalance);
         setXp(wallet.xp);
+        appendLocalHistory(amount, label || "spend", "spend");
+        refreshEngagement();
         if (label) pushToast(label);
         return true;
       } catch {
@@ -175,7 +366,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         return false;
       }
     },
-    [openTopUp, pushToast],
+    [openTopUp, pushToast, refreshEngagement],
   );
 
   const spend = useCallback(
@@ -187,6 +378,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       setCoins((c) => c - amount);
       setXp((x) => x + amount);
+      appendLocalHistory(amount, label || "spend", "spend");
+      refreshEngagement();
       void spendCoinsApi({ amount, reason: label || "spend" }).catch(() => {
         void syncWallet();
         openTopUp(15);
@@ -194,42 +387,93 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (label) pushToast(label);
       return true;
     },
-    [coins, openTopUp, pushToast, syncWallet],
+    [coins, openTopUp, pushToast, refreshEngagement, syncWallet],
   );
 
   const addCoins = useCallback(
     (amount: number, label?: string) => {
       setCoins((c) => c + amount);
-      if (label) pushToast(label);
+      if (label) {
+        appendLocalHistory(amount, label, "credit");
+        refreshEngagement();
+        pushToast(label);
+        triggerCoinBurst(amount);
+      }
       closeTopUp();
       void syncWallet();
     },
-    [closeTopUp, pushToast, syncWallet],
+    [closeTopUp, pushToast, refreshEngagement, syncWallet, triggerCoinBurst],
   );
 
-  const toggleFollow = useCallback((id: string) => {
-    setFollowing((f) =>
-      f.includes(id) ? f.filter((x) => x !== id) : [...f, id],
-    );
-  }, []);
+  const toggleFollow = useCallback(
+    (id: string) => {
+      setFollowing((f) => {
+        const next = f.includes(id) ? f.filter((x) => x !== id) : [...f, id];
+        if (!f.includes(id)) {
+          setEngagement(recordFollow());
+        }
+        return next;
+      });
+    },
+    [],
+  );
+
+  const activatePremium = useCallback(
+    async (planId: string, welcomeCoins: number) => {
+      try {
+        const wallet = await setPremiumApi({ isPremium: true, planId });
+        setPremium(true);
+        setCoins(wallet.coinBalance);
+        setXp(wallet.xp);
+      } catch {
+        setPremium(true);
+      }
+      if (welcomeCoins > 0) {
+        await creditReward(welcomeCoins, `VIP · +${welcomeCoins} welcome coins`);
+      }
+      await applyReward(markVipJoined());
+      triggerEntranceBlast();
+      pushToast("Welcome to Luma VIP");
+    },
+    [applyReward, creditReward, pushToast, triggerEntranceBlast],
+  );
 
   const value = useMemo(
     () => ({
       ready,
       userId,
+      displayName,
+      avatarUrl,
       coins,
       xp,
       vipTier,
       isPremium,
       following,
       toasts,
+      engagement,
+      refreshEngagement,
+      claimCheckIn,
+      doLuckySpin,
+      claimWeeklyMission,
+      applyReferral,
+      completeCallEngagement,
+      completeGiftEngagement,
+      completeFollowEngagement,
+      completeLiveWatch,
+      useFreeTrial,
+      endFreeTrial,
+      freeTrialAvailable,
+      enablePushOptIn,
       spend,
       spendAsync,
       addCoins,
+      creditReward,
       syncWallet,
+      updateDisplayName,
       addXp,
       toggleFollow,
       setPremium,
+      activatePremium,
       pushToast,
       topUpOpen,
       topUpGrace,
@@ -239,22 +483,43 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entranceReady,
       triggerEntranceBlast,
       clearEntranceBlast,
+      coinBurst,
+      triggerCoinBurst,
     }),
     [
       ready,
       userId,
+      displayName,
+      avatarUrl,
       coins,
       xp,
       vipTier,
       isPremium,
       following,
       toasts,
+      engagement,
+      refreshEngagement,
+      claimCheckIn,
+      doLuckySpin,
+      claimWeeklyMission,
+      applyReferral,
+      completeCallEngagement,
+      completeGiftEngagement,
+      completeFollowEngagement,
+      completeLiveWatch,
+      useFreeTrial,
+      endFreeTrial,
+      freeTrialAvailable,
+      enablePushOptIn,
       spend,
       spendAsync,
       addCoins,
+      creditReward,
       syncWallet,
+      updateDisplayName,
       addXp,
       toggleFollow,
+      activatePremium,
       pushToast,
       topUpOpen,
       topUpGrace,
@@ -264,6 +529,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       entranceReady,
       triggerEntranceBlast,
       clearEntranceBlast,
+      coinBurst,
+      triggerCoinBurst,
     ],
   );
 
@@ -275,3 +542,5 @@ export function useApp() {
   if (!ctx) throw new Error("useApp must be used within AppProvider");
   return ctx;
 }
+
+export { nextCheckInReward, spinsRemaining };
