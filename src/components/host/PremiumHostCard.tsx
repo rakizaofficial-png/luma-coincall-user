@@ -1,6 +1,5 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { type MouseEvent, useEffect, useState } from "react";
@@ -19,13 +18,12 @@ function statusLabel(host: DiscoverHost, mode: Mode) {
   return { text: "Offline", tone: "off" as const };
 }
 
+/** Plain <img> — avoids Next/Image domain whitelist failures for host DPs */
 function HostPhoto({
   host,
-  sizes,
   className,
 }: {
   host: DiscoverHost;
-  sizes: string;
   className?: string;
 }) {
   const fallback = defaultHostAvatar(host.id, host.name);
@@ -36,15 +34,13 @@ function HostPhoto({
   }, [host.avatarUrl, fallback]);
 
   return (
-    <Image
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
       src={src}
       alt={host.name}
-      fill
-      className={className || "object-cover"}
-      sizes={sizes}
-      unoptimized={
-        src.includes("ui-avatars.com") || src.includes("firebasestorage")
-      }
+      className={className || "h-full w-full object-cover"}
+      loading="lazy"
+      referrerPolicy="no-referrer"
       onError={() => {
         if (src !== fallback) setSrc(fallback);
       }}
@@ -99,8 +95,7 @@ export function HostGridCard({
       <Link href={profileHref} className="relative block aspect-[3/4] w-full">
         <HostPhoto
           host={host}
-          sizes="(max-width: 430px) 50vw, 200px"
-          className="object-cover transition duration-500 group-hover:scale-105"
+          className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-105"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/25" />
 
@@ -203,7 +198,7 @@ export function PremiumHostCard({
         className="relative flex w-[148px] shrink-0 flex-col overflow-hidden rounded-2xl bg-ink-2"
       >
         <div className="relative h-[168px] w-full">
-          <HostPhoto host={host} sizes="148px" className="object-cover" />
+          <HostPhoto host={host} className="absolute inset-0 h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-t from-ink via-transparent to-transparent" />
           {(host.online || host.live) && (
             <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white backdrop-blur">
