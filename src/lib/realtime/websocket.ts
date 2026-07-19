@@ -25,12 +25,44 @@ export type RealtimeEvent =
   | {
       type: "gift:received";
       payload: {
-        roomId?: string;
+        roomId?: string | null;
         fromUserId: string;
+        fromName?: string;
+        toHostId?: string;
         giftId: string;
+        giftName?: string;
+        giftEmoji?: string;
         coins: number;
-        label: string;
+        label?: string;
       };
+    }
+  | {
+      type: "live:comment";
+      payload: {
+        roomId: string;
+        comment: {
+          id: string;
+          userId: string;
+          userName: string;
+          text: string;
+          createdAt: number;
+          kind: string;
+          giftEmoji?: string;
+          giftCoins?: number;
+        };
+      };
+    }
+  | {
+      type: "live:viewers";
+      payload: { roomId: string; viewers: number };
+    }
+  | {
+      type: "live:room";
+      payload: Record<string, unknown>;
+    }
+  | {
+      type: "live:ended";
+      payload: { id: string };
     }
   | {
       type: "party:message";

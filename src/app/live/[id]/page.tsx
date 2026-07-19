@@ -1,204 +1,538 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import {
+  FormEvent,
+  use,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { motion } from "framer-motion";
-import {
-  ArrowLeft,
-  Eye,
-  Gift,
-  Heart,
-  MessageCircle,
-  Video,
-} from "lucide-react";
-import { fetchLiveHosts } from "@/lib/api";
-import { resolveLiveCreator } from "@/lib/data";
-import { mergeDiscoverHosts } from "@/lib/discoverHosts";
+import { useRouter } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
+import { Gem, MoreHorizontal, Plus, X } from "lucide-react";
+import { gifts } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import { GiftSheet } from "@/components/GiftSheet";
+import {
+  startUserAgoraLiveViewer,
+  stopUserAgoraLiveViewer,
+} from "@/lib/agora";
+import {
+  bumpLiveViewers,
+  fetchHostOnlyLiveRoom,
+  fetchLiveAgoraToken,
+  resolveAgoraAppId,
+  type HostOnlyLiveRoom,
+  type LiveComment,
+} from "@/lib/liveApi";
+import {
+  listenLiveComments,
+  listenRoomGiftCoins,
+  sendLiveComment,
+} from "@/lib/liveChat";
+import { getDeviceUserId } from "@/lib/walletApi";
+import { getRealtimeClient } from "@/lib/realtime/websocket";
 
-const chatFeed = [
-  { user: "Alex", text: "This vibe is unreal 🔥" },
-  { user: "Kai", text: "Play that song again!" },
-  { user: "Nora", text: "Sent a Rose 🌹" },
-  { user: "You", text: "Hey! Just joined ✨" },
+const NAME_COLORS = [
+  "text-cyan-300",
+  "text-pink-300",
+  "text-amber-300",
+  "text-lime-300",
+  "text-violet-300",
 ];
 
-export default function LiveRoomPage({
+function nameColor(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h + name.charCodeAt(i) * (i + 1)) % NAME_COLORS.length;
+  return NAME_COLORS[h]!;
+}
+
+export default function HostOnlyLiveRoomPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
   const { id } = use(params);
-  const { coins, following, toggleFollow, spend } = useApp();
-  const [creator, setCreator] = useState(() => resolveLiveCreator(id));
-  const [giftOpen, setGiftOpen] = useState(false);
-  const [likes, setLikes] = useState(0);
-  const [viewers, setViewers] = useState(creator.viewers || 1200);
-  const [floating, setFloating] = useState<string[]>([]);
+  const router = useRouter();
+  const { following, toggleFollow, coins, pushToast, syncWallet } = useApp();
+  const videoRef = useRef<HTMLDivElement>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const hosts = await fetchLiveHosts();
-        const merged = mergeDiscoverHosts(hosts);
-        const hit = merged.find((h) => h.id === id);
-        if (!cancelled && hit) {
-          setCreator(
-            resolveLiveCreator(id, {
-              name: hit.name,
-              image: hit.avatarUrl,
-              country: hit.country,
-              flag: hit.flag,
-              callRate: hit.callRate,
-              rating: hit.rating,
-              bio: hit.bio,
-              tags: hit.tags,
-            }),
-          );
-        }
-      } catch {
-        /* keep catalog / fallback */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const [room, setRoom] = useState<HostOnlyLiveRoom | null>(null);
+  const [status, setStatus] = useState<"loading" | "live" | "ended" | "error">(
+    "loading",
+  );
+  const [error, setError] = useState<string | null>(null);
+  const [comments, setComments] = useState<LiveComment[]>([]);
+  const [draft, setDraft] = useState("");
+  const [giftOpen, setGiftOpen] = useState(false);
+  const [floating, setFloating] = useState<{ id: string; emoji: string }[]>([]);
+  const [streamReady, setStreamReady] = useState(false);
+
+  const userId = useMemo(() => getDeviceUserId(), []);
+  const userName = "Luma Fan";
+
+  const remoteImg = Boolean(
+    room?.hostAvatar &&
+      (room.hostAvatar.includes("pravatar") ||
+        room.hostAvatar.includes("dicebear") ||
+        !room.hostAvatar.includes("unsplash")),
+  );
+
+  const loadRoom = useCallback(async () => {
+    const next = await fetchHostOnlyLiveRoom(id);
+    if (!next || !next.isLive) {
+      setStatus("ended");
+      setRoom(next);
+      return null;
+    }
+    setRoom(next);
+    setStatus("live");
+    return next;
   }, [id]);
 
+  // Resolve room + join Agora as viewer
   useEffect(() => {
-    const t = setInterval(() => {
-      setViewers((v) => Math.max(1, v + Math.floor(Math.random() * 5) - 1));
-    }, 2800);
-    return () => clearInterval(t);
-  }, []);
+    let cancelled = false;
+    let joinedRoomId: string | null = null;
 
-  const like = () => {
-    setLikes((l) => l + 1);
-    setFloating((f) => [...f, "❤️"]);
-    setTimeout(() => setFloating((f) => f.slice(1)), 1200);
-  };
+    const waitForVideoEl = async () => {
+      for (let i = 0; i < 40; i++) {
+        if (videoRef.current) return videoRef.current;
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      return null;
+    };
 
-  const tipSmall = () => {
-    if (spend(10, "Rose sent to the room 🌹")) {
-      setFloating((f) => [...f, "🌹"]);
-      setTimeout(() => setFloating((f) => f.slice(1)), 1200);
+    (async () => {
+      try {
+        const next = await loadRoom();
+        if (cancelled || !next) return;
+
+        joinedRoomId = next.id;
+        void bumpLiveViewers({
+          roomId: next.id,
+          delta: 1,
+          userId,
+          userName,
+        });
+
+        const el = await waitForVideoEl();
+        if (cancelled) return;
+        if (!el) throw new Error("Video mount missing");
+
+        const channel = next.channel || `live_${next.hostId}`;
+        const uid = 300000 + Math.floor(Math.random() * 90000);
+        const token = await fetchLiveAgoraToken(channel, uid);
+        // Prefer server App ID so Render works even without NEXT_PUBLIC_AGORA_APP_ID
+        const appId = token.appId || resolveAgoraAppId();
+        if (!appId) throw new Error("Agora App ID missing");
+
+        await startUserAgoraLiveViewer({
+          appId,
+          channel: token.channel || channel,
+          token: token.token,
+          uid: token.uid || uid,
+          remoteVideoEl: el,
+          onRemoteVideo: () => {
+            if (!cancelled) setStreamReady(true);
+          },
+        });
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Could not join live");
+          setStatus("error");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      void stopUserAgoraLiveViewer();
+      if (joinedRoomId) {
+        void bumpLiveViewers({
+          roomId: joinedRoomId,
+          delta: -1,
+          userId,
+          userName,
+        });
+      }
+    };
+  }, [id, loadRoom, userId]);
+
+  // Chat + diamonds + end detection
+  useEffect(() => {
+    if (!room?.id || status !== "live") return;
+
+    const offChat = listenLiveComments(room.id, userId, setComments);
+    const offGift = listenRoomGiftCoins(room.id, (giftCoins, viewers) => {
+      setRoom((r) =>
+        r
+          ? {
+              ...r,
+              giftCoins,
+              viewers: viewers ?? r.viewers,
+            }
+          : r,
+      );
+    });
+
+    const rt = getRealtimeClient(userId);
+    rt.connect();
+    const offRt = rt.subscribe((ev) => {
+      if (ev.type === "live:ended" && ev.payload.id === room.id) {
+        setStatus("ended");
+        void stopUserAgoraLiveViewer();
+      }
+      if (ev.type === "live:viewers" && ev.payload.roomId === room.id) {
+        setRoom((r) => (r ? { ...r, viewers: ev.payload.viewers } : r));
+      }
+      if (ev.type === "gift:received") {
+        const p = ev.payload;
+        if (p.roomId && p.roomId !== room.id) return;
+        if (p.toHostId && p.toHostId !== room.hostId) return;
+        setRoom((r) =>
+          r ? { ...r, giftCoins: r.giftCoins + Number(p.coins || 0) } : r,
+        );
+        const emoji = p.giftEmoji || "🎁";
+        const fid = `${Date.now()}-${Math.random()}`;
+        setFloating((f) => [...f.slice(-8), { id: fid, emoji }]);
+        setTimeout(
+          () => setFloating((f) => f.filter((x) => x.id !== fid)),
+          1400,
+        );
+      }
+    });
+
+    const poll = setInterval(() => {
+      void fetchHostOnlyLiveRoom(room.hostId).then((n) => {
+        if (!n || !n.isLive) {
+          setStatus("ended");
+          void stopUserAgoraLiveViewer();
+        } else {
+          setRoom((r) =>
+            r
+              ? {
+                  ...r,
+                  viewers: n.viewers,
+                  giftCoins: n.giftCoins,
+                  title: n.title,
+                }
+              : n,
+          );
+        }
+      });
+    }, 10000);
+
+    return () => {
+      offChat();
+      offGift();
+      offRt();
+      clearInterval(poll);
+    };
+  }, [room?.id, room?.hostId, status, userId]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [comments.length]);
+
+  const onSendChat = async (e: FormEvent) => {
+    e.preventDefault();
+    const text = draft.trim();
+    if (!text || !room) return;
+    setDraft("");
+    try {
+      await sendLiveComment({
+        roomId: room.id,
+        userId,
+        userName,
+        text,
+      });
+    } catch (err) {
+      pushToast?.(err instanceof Error ? err.message : "Message failed");
+      setDraft(text);
     }
   };
 
-  const remoteImg =
-    creator.image.includes("pravatar") ||
-    creator.image.includes("dicebear") ||
-    !creator.image.includes("unsplash");
+  const sendQuickGift = async (giftId: string) => {
+    if (!room) return;
+    const g = gifts.find((x) => x.id === giftId);
+    if (!g) return;
+    try {
+      const { requireApiBase } = await import("@/config/apiConfig");
+      const res = await fetch(`${requireApiBase()}/gifts/send`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-User-Id": userId,
+        },
+        body: JSON.stringify({
+          userId,
+          userName,
+          hostId: room.hostId,
+          giftId: g.id,
+          roomId: room.id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Gift failed");
+      await syncWallet?.();
+      const fid = `${Date.now()}`;
+      setFloating((f) => [...f.slice(-8), { id: fid, emoji: g.emoji }]);
+      setTimeout(() => setFloating((f) => f.filter((x) => x.id !== fid)), 1400);
+    } catch (err) {
+      pushToast?.(err instanceof Error ? err.message : "Gift failed");
+    }
+  };
+
+  const avatar =
+    room?.hostAvatar ||
+    `https://i.pravatar.cc/150?u=${encodeURIComponent(id)}`;
 
   return (
-    <main className="relative min-h-dvh overflow-hidden bg-ink">
-      <Image
-        src={creator.image}
-        alt={creator.name}
-        fill
-        priority
-        className="object-cover"
-        unoptimized={remoteImg}
+    <main className="relative min-h-dvh overflow-hidden bg-black">
+      {/* Agora remote video plane */}
+      <div
+        ref={videoRef}
+        id="agora-live-remote"
+        className="absolute inset-0 z-0 bg-black [&_video]:h-full [&_video]:w-full [&_video]:object-cover"
       />
-      <div className="absolute inset-0 bg-gradient-to-b from-black/50 via-transparent to-black/90" />
 
-      <div className="relative z-10 flex min-h-dvh flex-col px-4 pb-6 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div className="flex items-start justify-between">
-          <div className="flex items-center gap-2">
-            <Link
-              href="/live"
-              className="rounded-full bg-black/40 p-2 backdrop-blur"
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Link>
-            <div className="flex items-center gap-2 rounded-full bg-black/45 py-1 pl-1 pr-3 backdrop-blur">
-              <Image
-                src={creator.image}
-                alt=""
-                width={36}
-                height={36}
-                className="h-9 w-9 rounded-full object-cover"
-                unoptimized={remoteImg}
-              />
-              <div>
-                <p className="text-sm font-bold leading-tight">{creator.name}</p>
-                <p className="flex items-center gap-1 text-[10px] text-white/70">
-                  <Eye className="h-3 w-3" /> {viewers.toLocaleString()}
-                </p>
-              </div>
-            </div>
+      {/* Cover while connecting / waiting for host video */}
+      {!streamReady && (
+        <div className="absolute inset-0 z-[1]">
+          <Image
+            src={avatar}
+            alt=""
+            fill
+            priority
+            className="object-cover opacity-70"
+            unoptimized={remoteImg || true}
+          />
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+            <p className="rounded-full bg-black/55 px-4 py-2 text-sm font-semibold text-white backdrop-blur">
+              {status === "error"
+                ? "Connection failed"
+                : status === "ended"
+                  ? "Live ended"
+                  : "Connecting to host…"}
+            </p>
           </div>
-          <button
-            type="button"
-            onClick={() => toggleFollow(creator.id)}
-            className={`rounded-full px-3 py-1.5 text-xs font-bold ${
-              following.includes(creator.id)
-                ? "bg-white/20 text-white"
-                : "bg-coral text-white"
-            }`}
-          >
-            {following.includes(creator.id) ? "Following" : "Follow"}
-          </button>
+        </div>
+      )}
+
+      <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-b from-black/55 via-transparent to-black/85" />
+
+      <div className="relative z-10 flex min-h-dvh flex-col px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-[max(0.5rem,env(safe-area-inset-top))]">
+        {/* Header */}
+        <div className="pointer-events-auto flex items-start justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2 rounded-full bg-black/45 py-1 pl-1 pr-2 backdrop-blur-md">
+            <Image
+              src={avatar}
+              alt=""
+              width={36}
+              height={36}
+              className="h-9 w-9 rounded-full object-cover"
+              unoptimized
+            />
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold leading-tight text-white">
+                {room?.hostName || "Host"}
+              </p>
+              <p className="text-[10px] text-white/70">
+                {status === "live" ? "LIVE" : status.toUpperCase()}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => room && toggleFollow(room.hostId)}
+              className={`ml-1 flex h-7 w-7 items-center justify-center rounded-full ${
+                room && following.includes(room.hostId)
+                  ? "bg-white/20"
+                  : "bg-[#ff2d55]"
+              }`}
+              aria-label="Follow"
+            >
+              <Plus className="h-4 w-4 text-white" strokeWidth={3} />
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1 rounded-full bg-black/45 px-2 py-1 backdrop-blur-md">
+              <span className="flex -space-x-1.5">
+                {[0, 1, 2].map((i) => (
+                  <span
+                    key={i}
+                    className="inline-block h-5 w-5 rounded-full border border-white/30 bg-white/20"
+                    style={{
+                      backgroundImage: `url(https://i.pravatar.cc/40?u=v${i}${id})`,
+                      backgroundSize: "cover",
+                    }}
+                  />
+                ))}
+              </span>
+              <span className="pl-1 text-xs font-bold tabular-nums text-white">
+                {room?.viewers?.toLocaleString() || "0"}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push("/live")}
+              className="rounded-full bg-black/45 p-2 backdrop-blur-md"
+              aria-label="Close"
+            >
+              <X className="h-5 w-5 text-white" />
+            </button>
+          </div>
         </div>
 
-        <div className="mt-auto space-y-3">
-          <div className="max-h-36 space-y-1.5 overflow-hidden">
-            {chatFeed.map((m) => (
-              <p key={m.user + m.text} className="text-sm text-white/90">
-                <span className="font-bold text-cyan">{m.user}</span> {m.text}
-              </p>
+        {/* Diamonds received (host counter visible to fans) */}
+        <div className="pointer-events-none mt-3 flex justify-start">
+          <div className="inline-flex items-center gap-1.5 rounded-full bg-black/50 px-2.5 py-1 backdrop-blur-md">
+            <Gem className="h-3.5 w-3.5 text-amber-300" />
+            <span className="text-[11px] font-bold tabular-nums text-amber-200">
+              {(room?.giftCoins || 0).toLocaleString()} diamonds
+            </span>
+          </div>
+        </div>
+
+        <div className="mt-auto space-y-2">
+          {/* Chat overlay */}
+          <div className="pointer-events-none max-h-44 space-y-1.5 overflow-y-auto pr-16 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {comments.map((m) =>
+              m.kind === "gift" ? (
+                <div
+                  key={m.id}
+                  className="inline-flex max-w-[85%] items-center gap-1.5 rounded-2xl bg-[#7b2cff]/75 px-2.5 py-1 text-xs text-white backdrop-blur-sm"
+                >
+                  <span>{m.giftEmoji || "🎁"}</span>
+                  <span className="font-bold">{m.userName}</span>
+                  <span className="opacity-90">{m.text}</span>
+                </div>
+              ) : m.kind === "join" ? (
+                <p key={m.id} className="text-xs text-white/75">
+                  <span className={`font-bold ${nameColor(m.userName)}`}>
+                    {m.userName}
+                  </span>{" "}
+                  joined
+                </p>
+              ) : (
+                <p key={m.id} className="text-sm text-white/95 drop-shadow">
+                  <span className={`font-bold ${nameColor(m.userName)}`}>
+                    {m.userName}
+                  </span>{" "}
+                  {m.text}
+                </p>
+              ),
+            )}
+            <div ref={chatEndRef} />
+          </div>
+
+          {/* Quick gift row */}
+          <div className="pointer-events-auto -mx-1 flex gap-2 overflow-x-auto px-1 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {gifts.slice(0, 6).map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => void sendQuickGift(g.id)}
+                className="flex shrink-0 flex-col items-center gap-0.5 rounded-xl bg-black/35 px-2.5 py-1.5 backdrop-blur-md"
+              >
+                <span className="text-xl leading-none">{g.emoji}</span>
+                <span className="text-[10px] font-semibold text-amber-200">
+                  {g.coins}
+                </span>
+              </button>
             ))}
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={like}
-              className="rounded-full bg-black/45 p-3 backdrop-blur"
-            >
-              <Heart className="h-5 w-5 text-coral" />
-            </button>
-            <button
-              type="button"
-              onClick={tipSmall}
-              className="rounded-full bg-black/45 p-3 backdrop-blur"
-            >
-              <Gift className="h-5 w-5 text-gold" />
-            </button>
-            <Link
-              href={`/call/${creator.id}?live=1`}
-              className="flex flex-1 items-center justify-center gap-2 rounded-full bg-coral py-3 text-sm font-bold text-white"
-            >
-              <Video className="h-4 w-4" /> Private call · {creator.callRate}/min
-            </Link>
+
+          {/* Bottom bar */}
+          <form
+            onSubmit={onSendChat}
+            className="pointer-events-auto flex items-center gap-2"
+          >
+            <input
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              placeholder="Type something sweet..."
+              maxLength={200}
+              className="min-w-0 flex-1 rounded-full border border-white/15 bg-black/45 px-4 py-2.5 text-sm text-white outline-none placeholder:text-white/45 backdrop-blur-md"
+            />
             <button
               type="button"
               onClick={() => setGiftOpen(true)}
-              className="rounded-full bg-black/45 p-3 backdrop-blur"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-amber-300 to-rose-500 shadow-lg shadow-rose-500/30"
+              aria-label="Gifts"
             >
-              <MessageCircle className="h-5 w-5" />
+              <span className="text-lg">🎁</span>
             </button>
-          </div>
-          <p className="text-center text-[10px] text-white/50">
-            {coins.toLocaleString()} coins · {likes} likes
+            <button
+              type="button"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-black/45 backdrop-blur-md"
+              aria-label="More"
+            >
+              <MoreHorizontal className="h-5 w-5 text-white" />
+            </button>
+          </form>
+
+          <p className="pointer-events-none text-center text-[10px] text-white/45">
+            {coins.toLocaleString()} coins · host-only live
           </p>
         </div>
       </div>
 
-      {floating.map((e, i) => (
-        <motion.span
-          key={`${e}-${i}`}
-          initial={{ opacity: 1, y: 0 }}
-          animate={{ opacity: 0, y: -80 }}
-          className="pointer-events-none absolute bottom-32 right-8 text-2xl"
-        >
-          {e}
-        </motion.span>
-      ))}
+      <AnimatePresence>
+        {floating.map((f) => (
+          <motion.span
+            key={f.id}
+            initial={{ opacity: 1, y: 0, scale: 1 }}
+            animate={{ opacity: 0, y: -120, scale: 1.4 }}
+            exit={{ opacity: 0 }}
+            className="pointer-events-none absolute bottom-40 right-6 z-20 text-3xl"
+          >
+            {f.emoji}
+          </motion.span>
+        ))}
+      </AnimatePresence>
 
-      <GiftSheet open={giftOpen} onClose={() => setGiftOpen(false)} />
+      {(status === "ended" || status === "error") && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-black/70 px-6 text-center backdrop-blur-sm">
+          <div>
+            <p className="font-display text-2xl font-bold text-white">
+              {status === "ended" ? "Live ended" : "Can't join"}
+            </p>
+            <p className="mt-2 text-sm text-white/70">
+              {error || "This host is no longer streaming."}
+            </p>
+            <Link
+              href="/live"
+              className="mt-5 inline-flex rounded-full bg-[#ff2d55] px-5 py-2.5 text-sm font-bold text-white"
+            >
+              Back to Live
+            </Link>
+          </div>
+        </div>
+      )}
+
+      {room && (
+        <GiftSheet
+          open={giftOpen}
+          onClose={() => setGiftOpen(false)}
+          hostId={room.hostId}
+          roomId={room.id}
+          onSent={(emoji) => {
+            const fid = `${Date.now()}`;
+            setFloating((f) => [...f.slice(-8), { id: fid, emoji }]);
+            setTimeout(
+              () => setFloating((f) => f.filter((x) => x.id !== fid)),
+              1400,
+            );
+          }}
+        />
+      )}
     </main>
   );
 }

@@ -115,3 +115,83 @@ export async function stopUserAgoraCall() {
     // ignore
   }
 }
+
+/** Host-Only Live: viewer joins as subscriber (no local mic/cam publish). */
+type LiveViewerSession = {
+  client: import("agora-rtc-sdk-ng").IAgoraRTCClient;
+};
+
+let liveViewer: LiveViewerSession | null = null;
+
+export async function startUserAgoraLiveViewer(options: {
+  appId: string;
+  channel: string;
+  token: string;
+  uid: number;
+  remoteVideoEl: HTMLElement;
+  onRemoteVideo?: () => void;
+  onRemoteAudio?: () => void;
+}) {
+  await stopUserAgoraLiveViewer();
+  await stopUserAgoraCall();
+  prep(options.remoteVideoEl);
+
+  const AgoraRTC = (await import("agora-rtc-sdk-ng")).default;
+  AgoraRTC.setLogLevel(3);
+  // Host broadcasts in RTC mode — viewers must use the same mode (subscribe only).
+  const client = AgoraRTC.createClient({ mode: "rtc", codec: "vp8" });
+
+  const playRemote = async (
+    user: import("agora-rtc-sdk-ng").IAgoraRTCRemoteUser,
+    mediaType: "audio" | "video",
+  ) => {
+    try {
+      await client.subscribe(user, mediaType);
+      if (mediaType === "video" && user.videoTrack) {
+        user.videoTrack.play(options.remoteVideoEl, { fit: "cover" });
+        options.onRemoteVideo?.();
+      }
+      if (mediaType === "audio" && user.audioTrack) {
+        user.audioTrack.play();
+        options.onRemoteAudio?.();
+      }
+    } catch (err) {
+      console.warn("[agora live viewer] subscribe failed", err);
+    }
+  };
+
+  client.on("user-published", playRemote);
+  client.on("user-unpublished", (user, mediaType) => {
+    if (mediaType === "video") {
+      // keep placeholder until republish
+    }
+  });
+
+  await client.join(
+    options.appId,
+    options.channel,
+    options.token,
+    options.uid,
+  );
+
+  // Host may already be publishing when we join
+  for (const user of client.remoteUsers) {
+    if (user.hasVideo) await playRemote(user, "video");
+    if (user.hasAudio) await playRemote(user, "audio");
+  }
+
+  liveViewer = { client };
+  return liveViewer;
+}
+
+export async function stopUserAgoraLiveViewer() {
+  if (!liveViewer) return;
+  const { client } = liveViewer;
+  liveViewer = null;
+  try {
+    client.removeAllListeners();
+    await client.leave();
+  } catch {
+    // ignore
+  }
+}

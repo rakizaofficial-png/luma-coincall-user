@@ -80,6 +80,7 @@ export const apiConfig = {
     messagingSenderId: read("NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID"),
     appId: read("NEXT_PUBLIC_FIREBASE_APP_ID"),
     vapidKey: read("NEXT_PUBLIC_FIREBASE_VAPID_KEY"),
+    databaseURL: read("NEXT_PUBLIC_FIREBASE_DATABASE_URL"),
   },
 
   aiHostCdn: read("NEXT_PUBLIC_AI_HOST_CDN"),
