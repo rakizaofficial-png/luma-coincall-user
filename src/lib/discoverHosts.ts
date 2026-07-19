@@ -1,5 +1,6 @@
 import type { LiveHost } from "@/lib/api";
 import { creators, type Creator } from "@/lib/data";
+import { pickHostAvatarUrl } from "@/lib/hostAvatar";
 
 export type DiscoverHost = {
   id: string;
@@ -22,7 +23,6 @@ export type DiscoverHost = {
   nearby: boolean;
   recentlyActive: boolean;
   source: "live" | "catalog";
-  /** Display gender for profile cards */
   gender: "female" | "male";
   age?: number;
 };
@@ -93,9 +93,10 @@ function enrichLive(h: LiveHost, i: number): DiscoverHost {
   return {
     id: h.id,
     name: h.name,
-    avatarUrl:
-      h.avatarUrl ||
-      `https://images.unsplash.com/photo-${["1534528741775-53994a69daeb", "1524504388940-b1c1722653e1", "1494790108377-be9c29b29330", "1517841905240-472988babdf9"][seed % 4]}?w=600&h=800&fit=crop`,
+    avatarUrl: pickHostAvatarUrl(
+      { avatarUrl: h.avatarUrl },
+      { hostId: h.id, name: h.name },
+    ),
     country,
     flag: flags[country] || "🌍",
     language: LANG_BY_COUNTRY[country] || "English",
@@ -109,7 +110,7 @@ function enrichLive(h: LiveHost, i: number): DiscoverHost {
     tags: i % 2 === 0 ? ["Live", "Talk"] : ["Chill", "Music"],
     bio: "Online now · ready for a real conversation",
     isNew: seed % 4 === 0,
-    trendingScore: (h.isLive ? 5000 : 0) + (h.isOnline ? 2000 : 0) + seed % 900,
+    trendingScore: (h.isLive ? 5000 : 0) + (h.isOnline ? 2000 : 0) + (seed % 900),
     nearby: seed % 3 === 0,
     recentlyActive: h.isOnline || h.isLive || h.isOnCall,
     source: "live",
@@ -150,7 +151,11 @@ export function filterHosts(
       case "Music":
         return h.tags.includes("Music");
       case "Chill":
-        return h.tags.includes("Chill") || h.tags.includes("Calm") || h.tags.includes("Talk");
+        return (
+          h.tags.includes("Chill") ||
+          h.tags.includes("Calm") ||
+          h.tags.includes("Talk")
+        );
       case "Party":
         return h.tags.includes("Party") || h.tags.includes("Dance") || h.live;
       case "Language":
@@ -163,7 +168,9 @@ export function filterHosts(
 
 export function sectionHosts(hosts: DiscoverHost[]) {
   const online = hosts.filter((h) => h.online || h.live);
-  const trending = [...hosts].sort((a, b) => b.trendingScore - a.trendingScore).slice(0, 12);
+  const trending = [...hosts]
+    .sort((a, b) => b.trendingScore - a.trendingScore)
+    .slice(0, 12);
   const newest = hosts.filter((h) => h.isNew).slice(0, 10);
   const topRated = [...hosts].sort((a, b) => b.rating - a.rating).slice(0, 10);
   const recommended = [...hosts]
@@ -189,7 +196,7 @@ export function hostFromId(id: string, live: LiveHost[] = []): DiscoverHost {
   return {
     id,
     name: "Host",
-    avatarUrl: `https://i.pravatar.cc/800?u=${encodeURIComponent(id)}`,
+    avatarUrl: pickHostAvatarUrl({}, { hostId: id, name: "Host" }),
     country: "Pakistan",
     flag: "🇵🇰",
     language: "Urdu",

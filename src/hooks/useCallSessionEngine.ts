@@ -11,6 +11,7 @@ import {
   type LiveHost,
   fetchLiveHosts,
 } from "@/lib/api";
+import { pickHostAvatarUrl } from "@/lib/hostAvatar";
 import {
   startUserAgoraCall,
   stopUserAgoraCall,
@@ -386,10 +387,12 @@ export function useCallSessionEngine(opts: {
 
   const displayName =
     aiHost?.name || liveHost?.name || bridgeCall?.hostName || "Host";
-  const displayAvatar =
-    aiHost?.avatar ||
-    liveHost?.avatarUrl ||
-    `https://i.pravatar.cc/800?u=${encodeURIComponent(hostId)}`;
+  const displayAvatar = pickHostAvatarUrl(
+    {
+      avatarUrl: aiHost?.avatar || liveHost?.avatarUrl,
+    },
+    { hostId, name: displayName },
+  );
 
   return {
     state,

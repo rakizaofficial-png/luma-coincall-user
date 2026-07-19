@@ -39,7 +39,7 @@ export function HomeScreen() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    const load = async () => {
       try {
         const live = await fetchLiveHosts();
         if (!cancelled) setHosts(mergeDiscoverHosts(live));
@@ -48,9 +48,13 @@ export function HomeScreen() {
       } finally {
         if (!cancelled) setLoading(false);
       }
-    })();
+    };
+    void load();
+    // Real-time DP / online sync without logout or hard refresh
+    const timer = setInterval(() => void load(), 8_000);
     return () => {
       cancelled = true;
+      clearInterval(timer);
     };
   }, []);
 

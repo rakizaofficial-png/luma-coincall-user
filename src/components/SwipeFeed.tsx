@@ -20,6 +20,7 @@ import { VipRibbon } from "@/components/VipRibbon";
 import { WalletDiamond } from "@/components/WalletDiamond";
 import { giftTickerLines } from "@/lib/data";
 import { fetchLiveHosts, type LiveHost } from "@/lib/api";
+import { pickHostAvatarUrl } from "@/lib/hostAvatar";
 import {
   resolveHostActivity,
   type HostActivityMode,
@@ -200,9 +201,10 @@ export function SwipeFeed() {
   }
 
   const name = current.host.name;
-  const image =
-    current.host.avatarUrl ||
-    `https://i.pravatar.cc/800?u=${encodeURIComponent(current.host.id)}`;
+  const image = pickHostAvatarUrl(
+    { avatarUrl: current.host.avatarUrl },
+    { hostId: current.host.id, name },
+  );
   const meta = `${current.host.country || "Live"} · ${activity.label}`;
   const viewers = activity.viewers;
 

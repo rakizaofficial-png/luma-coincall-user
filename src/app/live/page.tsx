@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Eye, Radio, Search, Trophy } from "lucide-react";
 import { fetchLiveHosts, type LiveHost } from "@/lib/api";
 import { requireApiBase } from "@/config/apiConfig";
+import { pickHostAvatarUrl } from "@/lib/hostAvatar";
 
 type LiveRoomRow = {
   id: string;
@@ -34,11 +35,8 @@ type Card = {
 const TABS = ["Following", "Live", "Talent", "New"] as const;
 const REGIONS = ["All", "Pakistan", "Philippines", "Brazil", "Vietnam", "India", "USA"] as const;
 
-function avatarFor(id: string, url?: string | null) {
-  if (!url || url.startsWith("data:") || url.startsWith("blob:") || url.length > 2000) {
-    return `https://i.pravatar.cc/400?u=${encodeURIComponent(id)}`;
-  }
-  return url;
+function avatarFor(id: string, url?: string | null, name?: string) {
+  return pickHostAvatarUrl({ avatarUrl: url }, { hostId: id, name });
 }
 
 function flagEmoji(country: string) {

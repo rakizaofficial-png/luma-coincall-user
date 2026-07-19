@@ -21,6 +21,7 @@ import {
 } from "@/lib/dmStore";
 import { fetchLiveHosts } from "@/lib/api";
 import { hostFromId } from "@/lib/discoverHosts";
+import { pickHostAvatarUrl } from "@/lib/hostAvatar";
 import { getDeviceUserId } from "@/lib/walletApi";
 
 export default function ChatThreadPage({
@@ -51,7 +52,7 @@ export default function ChatThreadPage({
     (async () => {
       let hostId = id.startsWith("dm_") ? id.slice(3) : "";
       let name = "Host";
-      let image = `https://i.pravatar.cc/150?u=${encodeURIComponent(hostId || id)}`;
+      let image = pickHostAvatarUrl({}, { hostId: hostId || id, name: "Host" });
       let online = true;
 
       if (id.startsWith("dm_")) {
@@ -154,10 +155,10 @@ export default function ChatThreadPage({
           className="flex min-w-0 flex-1 items-center gap-3"
         >
           <Image
-            src={
-              hostMeta.image ||
-              `https://i.pravatar.cc/80?u=${encodeURIComponent(id)}`
-            }
+            src={pickHostAvatarUrl(
+              { avatarUrl: hostMeta.image },
+              { hostId: hostMeta.id || id, name: hostMeta.name },
+            )}
             alt={hostMeta.name}
             width={40}
             height={40}
