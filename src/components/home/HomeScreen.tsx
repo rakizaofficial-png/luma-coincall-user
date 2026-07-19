@@ -8,6 +8,7 @@ import {
   HostGridCard,
   HostGridSkeleton,
 } from "@/components/host/PremiumHostCard";
+import { LibraryPreviewPlayer } from "@/components/media/LibraryPreviewPlayer";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { WalletDiamond } from "@/components/WalletDiamond";
 import { fetchLiveHosts, searchProfileByAppId } from "@/lib/api";
@@ -220,6 +221,10 @@ export function HomeScreen() {
             Online
           </button>
         </div>
+      </div>
+
+      <div className="mt-4">
+        <LibraryPreviewPlayer category="preview" countdownSec={8} />
       </div>
 
       <div className="mt-4">

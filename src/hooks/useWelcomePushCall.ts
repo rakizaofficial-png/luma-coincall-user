@@ -4,23 +4,33 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   WELCOME_PUSH_CONFIG,
   WELCOME_PUSH_HOST,
+  type WelcomePushHost,
   type WelcomePushPhase,
 } from "@/lib/welcomePush/config";
+import {
+  nextLaunchDelayMs,
+  nextRepeatDelayMs,
+  nextRingDurationMs,
+  pickNextWelcomeCaller,
+} from "@/lib/welcomePush/rotation";
 import {
   startWelcomeRingTone,
   stopWelcomeRingTone,
 } from "@/lib/welcomePush/ringtone";
+import { pickRandomStatusLine } from "@/lib/welcomePush/uiCopy";
 
 /**
  * Lifecycle:
- * IDLE → INCOMING_CALL (mobile ringtone, max 30s)
- *      → Accept → TEASER → PAYWALL → DONE (then schedule next in 3 min)
- *      → Reject / timeout 30s → IDLE (schedule next in 3 min)
+ * IDLE → pick diversified host → INCOMING_CALL (ringtone)
+ *      → Accept → TEASER → PAYWALL → IDLE (schedule randomized next)
+ *      → Reject / timeout → IDLE (schedule randomized next)
  *
- * Repeats every 3 minutes while user is on home.
+ * Never reuses the same host/message within the cooldown window.
  */
 export function useWelcomePushCall(opts: { enabled: boolean }) {
   const [phase, setPhase] = useState<WelcomePushPhase>("IDLE");
+  const [host, setHost] = useState<WelcomePushHost>(WELCOME_PUSH_HOST);
+  const [statusLine, setStatusLine] = useState("Ringing…");
   const [offerLeft, setOfferLeft] = useState<number>(
     WELCOME_PUSH_CONFIG.offerSeconds,
   );
@@ -29,6 +39,7 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
   const ringTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const repeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const phaseRef = useRef<WelcomePushPhase>("IDLE");
+  const pickingRef = useRef(false);
 
   useEffect(() => {
     phaseRef.current = phase;
@@ -50,20 +61,47 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
     stopWelcomeRingTone();
   }, []);
 
+  const triggerIncoming = useCallback(async () => {
+    if (!opts.enabled) return;
+    if (phaseRef.current !== "IDLE" && phaseRef.current !== "DONE") return;
+    if (pickingRef.current) return;
+    pickingRef.current = true;
+    try {
+      const next = await pickNextWelcomeCaller();
+      // Prefer admin library teaser when available (additive)
+      try {
+        const { resolveLibraryTeaserUrl } = await import(
+          "@/lib/welcomePush/libraryTeaser"
+        );
+        const teaser = await resolveLibraryTeaserUrl();
+        if (teaser) next.teaser_video_url = teaser;
+      } catch {
+        /* keep host teaser */
+      }
+      if (!opts.enabled) return;
+      if (phaseRef.current !== "IDLE" && phaseRef.current !== "DONE") return;
+      setHost(next);
+      setStatusLine(pickRandomStatusLine());
+      setPhase("INCOMING_CALL");
+      startWelcomeRingTone();
+    } catch {
+      /* stay idle; will retry on next schedule */
+    } finally {
+      pickingRef.current = false;
+    }
+  }, [opts.enabled]);
+
   const scheduleNext = useCallback(
     (delayMs: number) => {
       if (repeatTimer.current) clearTimeout(repeatTimer.current);
       repeatTimer.current = setTimeout(() => {
-        if (!opts.enabled) return;
-        if (phaseRef.current !== "IDLE" && phaseRef.current !== "DONE") return;
-        setPhase("INCOMING_CALL");
-        startWelcomeRingTone();
+        void triggerIncoming();
       }, delayMs);
     },
-    [opts.enabled],
+    [triggerIncoming],
   );
 
-  // First call + recurring every 3 minutes while on home
+  // First call + recurring while on home (randomized delays)
   useEffect(() => {
     if (!opts.enabled) {
       clearTimers();
@@ -71,14 +109,14 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
       setPhase("IDLE");
       return;
     }
-    scheduleNext(WELCOME_PUSH_CONFIG.launchDelayMs);
+    scheduleNext(nextLaunchDelayMs());
     return () => {
       clearTimers();
       if (repeatTimer.current) clearTimeout(repeatTimer.current);
     };
   }, [opts.enabled, clearTimers, scheduleNext]);
 
-  // Ringtone + auto-dismiss after 30s
+  // Ringtone + auto-dismiss (randomized ring window)
   useEffect(() => {
     if (phase !== "INCOMING_CALL") {
       stopWelcomeRingTone();
@@ -89,11 +127,12 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
       return;
     }
     startWelcomeRingTone();
+    const ringMs = nextRingDurationMs();
     ringTimer.current = setTimeout(() => {
       stopWelcomeRingTone();
       setPhase("IDLE");
-      scheduleNext(WELCOME_PUSH_CONFIG.repeatEveryMs);
-    }, WELCOME_PUSH_CONFIG.ringDurationMs);
+      scheduleNext(nextRepeatDelayMs());
+    }, ringMs);
     return () => {
       stopWelcomeRingTone();
       if (ringTimer.current) {
@@ -126,7 +165,7 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
   const rejectIncoming = useCallback(() => {
     stopWelcomeRingTone();
     setPhase("IDLE");
-    scheduleNext(WELCOME_PUSH_CONFIG.repeatEveryMs);
+    scheduleNext(nextRepeatDelayMs());
   }, [scheduleNext]);
 
   const acceptIncoming = useCallback(() => {
@@ -144,7 +183,7 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
   const closePaywall = useCallback(() => {
     clearTimers();
     setPhase("IDLE");
-    scheduleNext(WELCOME_PUSH_CONFIG.repeatEveryMs);
+    scheduleNext(nextRepeatDelayMs());
   }, [clearTimers, scheduleNext]);
 
   const hardDisconnectTeaser = useCallback(() => {
@@ -154,7 +193,8 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
 
   return {
     phase,
-    host: WELCOME_PUSH_HOST,
+    host,
+    statusLine,
     offerLeft,
     acceptIncoming,
     rejectIncoming,

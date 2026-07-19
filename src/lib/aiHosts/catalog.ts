@@ -1,4 +1,5 @@
 import type { AiHostRecord } from "./types";
+import { filterFemaleHosts, isFemaleHostProfile } from "@/lib/femaleHosts";
 
 /**
  * Replace this in-memory table with your real DB (Postgres / Firestore / Supabase).
@@ -27,7 +28,7 @@ function avatar(hostId: string, seed: string) {
   return `https://i.pravatar.cc/800?u=${encodeURIComponent(seed)}`;
 }
 
-/** AI Host Database Table (seed) */
+/** AI Host Database Table (seed) — premium female hosts only */
 export const AI_HOST_TABLE: AiHostRecord[] = [
   {
     host_id: "ai_mira",
@@ -39,6 +40,7 @@ export const AI_HOST_TABLE: AiHostRecord[] = [
     cost_per_minute: 80,
     country: "Korea",
     tags: ["chill", "night"],
+    gender: "female",
   },
   {
     host_id: "ai_sofia",
@@ -50,6 +52,7 @@ export const AI_HOST_TABLE: AiHostRecord[] = [
     cost_per_minute: 95,
     country: "Brazil",
     tags: ["dance", "fun"],
+    gender: "female",
   },
   {
     host_id: "ai_aya",
@@ -61,6 +64,7 @@ export const AI_HOST_TABLE: AiHostRecord[] = [
     cost_per_minute: 70,
     country: "Japan",
     tags: ["calm", "talk"],
+    gender: "female",
   },
   {
     host_id: "ai_lina",
@@ -72,6 +76,7 @@ export const AI_HOST_TABLE: AiHostRecord[] = [
     cost_per_minute: 85,
     country: "Turkey",
     tags: ["party", "warm"],
+    gender: "female",
   },
   {
     host_id: "ai_elena",
@@ -83,28 +88,34 @@ export const AI_HOST_TABLE: AiHostRecord[] = [
     cost_per_minute: 100,
     country: "Spain",
     tags: ["music", "premium"],
+    gender: "female",
   },
 ];
 
+const FEMALE_AI_HOSTS = filterFemaleHosts(AI_HOST_TABLE);
+
 export function getAiHostById(hostId: string): AiHostRecord | null {
-  return (
-    AI_HOST_TABLE.find((h) => h.host_id === hostId) ||
-    AI_HOST_TABLE.find((h) => hostId.includes(h.host_id.replace("ai_", ""))) ||
-    null
-  );
+  const row =
+    FEMALE_AI_HOSTS.find((h) => h.host_id === hostId) ||
+    FEMALE_AI_HOSTS.find((h) =>
+      hostId.includes(h.host_id.replace("ai_", "")),
+    ) ||
+    null;
+  if (row && !isFemaleHostProfile(row)) return null;
+  return row;
 }
 
-/** Map a UI creator / live host id onto the closest AI persona */
+/** Map a UI creator / live host id onto the closest AI persona (female only) */
 export function resolveAiHostForRequest(requestedId: string): AiHostRecord {
   const direct = getAiHostById(requestedId);
   if (direct) return direct;
 
-  // Map demo creators c1..c6 → AI rows
   const map: Record<string, string> = {
     c1: "ai_mira",
     c2: "ai_sofia",
     c3: "ai_aya",
     c4: "ai_lina",
+    c5: "ai_mira",
     c6: "ai_elena",
   };
   const mapped = map[requestedId];
@@ -113,14 +124,14 @@ export function resolveAiHostForRequest(requestedId: string): AiHostRecord {
     if (row) return row;
   }
 
-  // Stable hash pick so the same requested id always gets the same AI host
+  const table = FEMALE_AI_HOSTS.length ? FEMALE_AI_HOSTS : AI_HOST_TABLE;
   let hash = 0;
   for (let i = 0; i < requestedId.length; i++) {
-    hash = (hash + requestedId.charCodeAt(i) * (i + 1)) % AI_HOST_TABLE.length;
+    hash = (hash + requestedId.charCodeAt(i) * (i + 1)) % table.length;
   }
-  return AI_HOST_TABLE[hash]!;
+  return table[hash]!;
 }
 
 export function listAiHosts(): AiHostRecord[] {
-  return AI_HOST_TABLE;
+  return FEMALE_AI_HOSTS.length ? FEMALE_AI_HOSTS : AI_HOST_TABLE;
 }

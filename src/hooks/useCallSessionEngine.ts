@@ -17,6 +17,13 @@ import {
 } from "@/lib/agora";
 import { fakeHandshakeDelayMs, routeOneToOneCall } from "@/lib/aiHosts/routeCall";
 import type { AiHostRecord, CallEngineState, CallTransport } from "@/lib/aiHosts/types";
+import {
+  endCallSession,
+  listenCallSessionEnded,
+  upsertCallSession,
+} from "@/lib/firebaseCallSession";
+import { ensureFbWallet } from "@/lib/firebaseWallet";
+import { isFirebaseReady } from "@/lib/firebase";
 import { startRingingTone, stopRingingTone } from "@/lib/ringingTone";
 
 export type CallSessionEngine = {
@@ -26,9 +33,11 @@ export type CallSessionEngine = {
   aiHost: AiHostRecord | null;
   liveHost: LiveHost | null;
   bridgeCall: BridgeCall | null;
+  /** Firebase / billing session id (bridge id or AI local id) */
+  sessionId: string | null;
   remoteRef: RefObject<HTMLDivElement | null>;
   localRef: RefObject<HTMLDivElement | null>;
-  disconnect: () => Promise<void>;
+  disconnect: (opts?: { remoteEnded?: boolean; reason?: string }) => Promise<void>;
   ratePerMinute: number;
   displayName: string;
   displayAvatar: string;
@@ -54,72 +63,102 @@ export function useCallSessionEngine(opts: {
   const [aiHost, setAiHost] = useState<AiHostRecord | null>(null);
   const [liveHost, setLiveHost] = useState<LiveHost | null>(null);
   const [bridgeCall, setBridgeCall] = useState<BridgeCall | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
 
   const remoteRef = useRef<HTMLDivElement | null>(null);
   const localRef = useRef<HTMLDivElement | null>(null);
   const callIdRef = useRef<string | null>(null);
+  const sessionIdRef = useRef<string | null>(null);
   const cancelledRef = useRef(false);
+  const endingRef = useRef(false);
 
-  const disconnect = useCallback(async (opts?: { remoteEnded?: boolean }) => {
+  const disconnect = useCallback(async (opts?: {
+    remoteEnded?: boolean;
+    reason?: string;
+  }) => {
+    if (endingRef.current) return;
+    endingRef.current = true;
     cancelledRef.current = true;
     stopRingingTone();
     await stopUserAgoraCall();
+
+    const sid = sessionIdRef.current || callIdRef.current;
+    if (sid && !opts?.remoteEnded && isFirebaseReady()) {
+      await endCallSession(sid, opts?.reason || "user_hangup").catch(
+        () => undefined,
+      );
+    }
+
     if (callIdRef.current) {
       if (!opts?.remoteEnded) {
-        await endBridgeCall(callIdRef.current);
+        await endBridgeCall(callIdRef.current).catch(() => undefined);
       }
       callIdRef.current = null;
     }
+    sessionIdRef.current = null;
+    setSessionId(null);
     setState("DISCONNECTED");
     setStatusText("Call ended");
   }, []);
 
-  // Real-time sync: leave when peer ends the call
+  // Real-time sync: leave when peer ends the call (Express + Firebase)
   useEffect(() => {
-    if (state !== "CONNECTED" || !bridgeCall?.id) return;
-    const callId = bridgeCall.id;
+    if (state !== "CONNECTED") return;
+    const callId = bridgeCall?.id || sessionId;
+    if (!callId) return;
     let dead = false;
 
-    const poll = setInterval(() => {
-      void getCall(callId)
-        .then((c) => {
-          if (dead) return;
-          if (
-            c.status === "ended" ||
-            c.status === "missed" ||
-            c.status === "rejected"
-          ) {
-            void disconnect({ remoteEnded: true });
-          }
-        })
-        .catch(() => undefined);
-    }, 2000);
+    const poll = bridgeCall?.id
+      ? setInterval(() => {
+          void getCall(bridgeCall.id)
+            .then((c) => {
+              if (dead) return;
+              if (
+                c.status === "ended" ||
+                c.status === "missed" ||
+                c.status === "rejected"
+              ) {
+                void disconnect({ remoteEnded: true, reason: "peer_ended" });
+              }
+            })
+            .catch(() => undefined);
+        }, 2000)
+      : undefined;
 
     let offWs: (() => void) | undefined;
-    void import("@/lib/walletApi").then(({ getDeviceUserId }) => {
-      void import("@/lib/realtime/websocket").then(({ getRealtimeClient }) => {
-        if (dead) return;
-        const rt = getRealtimeClient(getDeviceUserId());
-        rt.connect();
-        offWs = rt.subscribe((ev) => {
-          if (ev.type !== "call:ended") return;
-          const id = String((ev.payload as { id?: string })?.id || "");
-          if (id && id !== callId) return;
-          void disconnect({ remoteEnded: true });
+    if (bridgeCall?.id) {
+      void import("@/lib/walletApi").then(({ getDeviceUserId }) => {
+        void import("@/lib/realtime/websocket").then(({ getRealtimeClient }) => {
+          if (dead) return;
+          const rt = getRealtimeClient(getDeviceUserId());
+          rt.connect();
+          offWs = rt.subscribe((ev) => {
+            if (ev.type !== "call:ended") return;
+            const id = String((ev.payload as { id?: string })?.id || "");
+            if (id && id !== bridgeCall.id) return;
+            void disconnect({ remoteEnded: true, reason: "peer_ended" });
+          });
         });
       });
+    }
+
+    const offFb = listenCallSessionEnded(callId, () => {
+      if (dead) return;
+      void disconnect({ remoteEnded: true, reason: "session_ended" });
     });
 
     return () => {
       dead = true;
-      clearInterval(poll);
+      if (poll) clearInterval(poll);
       offWs?.();
+      offFb();
     };
-  }, [state, bridgeCall?.id, disconnect]);
+  }, [state, bridgeCall?.id, sessionId, disconnect]);
 
   useEffect(() => {
     if (!enabled) return;
     cancelledRef.current = false;
+    endingRef.current = false;
 
     (async () => {
       try {
@@ -146,11 +185,6 @@ export function useCallSessionEngine(opts: {
 
         if (cancelledRef.current) return;
 
-        // Force AI path when not preferring live (demo / offline entry)
-        if (!preferLiveBridge && decision.transport === "agora_live") {
-          // Still allow Agora if user explicitly asked live=1 via preferLiveBridge
-        }
-
         // --- AGORA LIVE PATH ---
         if (decision.transport === "agora_live" && decision.liveHostId) {
           setTransport("agora_live");
@@ -161,7 +195,9 @@ export function useCallSessionEngine(opts: {
           setLiveHost(host);
 
           // Pre-check: block empty / insufficient wallets before ringing
-          const { fetchOrCreateWallet } = await import("@/lib/walletApi");
+          const { fetchOrCreateWallet, getDeviceUserId } = await import(
+            "@/lib/walletApi"
+          );
           const wallet = await fetchOrCreateWallet();
           const need = Math.max(1, Math.floor(Number(host.ratePerMinute) || 80));
           if (wallet.coinBalance < need) {
@@ -176,18 +212,46 @@ export function useCallSessionEngine(opts: {
           if (cancelledRef.current) return;
 
           setStatusText(`Ringing ${host.name}…`);
-          const { getDeviceUserId } = await import("@/lib/walletApi");
           const { getLocalProfile } = await import("@/lib/userProfile");
           const profile = getLocalProfile();
+          const userId = getDeviceUserId() || profile.userId;
           const call = await createCall({
             hostId: host.id,
-            userId: getDeviceUserId() || profile.userId,
+            userId,
             userName: profile.displayName,
             userAvatar: profile.avatarUrl,
           });
           if (cancelledRef.current) return;
           callIdRef.current = call.id;
+          sessionIdRef.current = call.id;
+          setSessionId(call.id);
           setBridgeCall(call);
+
+          // Seed free-tier wallets + shared call session (no Cloud Functions)
+          if (isFirebaseReady()) {
+            await ensureFbWallet(userId, {
+              coinBalance: wallet.coinBalance,
+              displayName: profile.displayName,
+              role: "user",
+            });
+            await ensureFbWallet(host.id, {
+              displayName: host.name,
+              role: "host",
+            });
+            await upsertCallSession({
+              id: call.id,
+              channel: call.channel,
+              hostId: host.id,
+              hostName: host.name,
+              hostAvatar: host.avatarUrl,
+              userId,
+              userName: profile.displayName,
+              userAvatar: profile.avatarUrl,
+              ratePerMinute: need,
+              status: "active",
+              startedAt: Date.now(),
+            });
+          }
 
           const accepted = await waitForAccept(call.id, (st) => {
             if (st === "ringing") setStatusText(`Waiting for ${host.name}…`);
@@ -227,7 +291,9 @@ export function useCallSessionEngine(opts: {
         const ai = decision.aiHost;
         if (!ai) throw new Error("AI host catalog empty");
 
-        const { fetchOrCreateWallet } = await import("@/lib/walletApi");
+        const { fetchOrCreateWallet, getDeviceUserId } = await import(
+          "@/lib/walletApi"
+        );
         const wallet = await fetchOrCreateWallet();
         const aiRate = Math.max(
           1,
@@ -249,6 +315,39 @@ export function useCallSessionEngine(opts: {
         stopRingingTone();
         if (cancelledRef.current) return;
 
+        const { getLocalProfile } = await import("@/lib/userProfile");
+        const profile = getLocalProfile();
+        const userId = getDeviceUserId() || profile.userId;
+        const aiSession = `ai_${ai.host_id}_${Date.now()}`;
+        callIdRef.current = null;
+        sessionIdRef.current = aiSession;
+        setSessionId(aiSession);
+
+        if (isFirebaseReady()) {
+          await ensureFbWallet(userId, {
+            coinBalance: wallet.coinBalance,
+            displayName: profile.displayName,
+            role: "user",
+          });
+          await ensureFbWallet(ai.host_id, {
+            displayName: ai.name,
+            role: "host",
+          });
+          await upsertCallSession({
+            id: aiSession,
+            channel: `ai_${ai.host_id}`,
+            hostId: ai.host_id,
+            hostName: ai.name,
+            hostAvatar: ai.avatar,
+            userId,
+            userName: profile.displayName,
+            userAvatar: profile.avatarUrl,
+            ratePerMinute: aiRate,
+            status: "active",
+            startedAt: Date.now(),
+          });
+        }
+
         setState("CONNECTED");
         setStatusText(`Connected with ${ai.name}`);
         onConnected?.({ transport: "ai_prerecorded", name: ai.name });
@@ -266,10 +365,15 @@ export function useCallSessionEngine(opts: {
       cancelledRef.current = true;
       stopRingingTone();
       void stopUserAgoraCall();
+      const sid = sessionIdRef.current || callIdRef.current;
+      if (sid && isFirebaseReady() && !endingRef.current) {
+        void endCallSession(sid, "cleanup").catch(() => undefined);
+      }
       if (callIdRef.current) {
         void endBridgeCall(callIdRef.current);
         callIdRef.current = null;
       }
+      sessionIdRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [enabled, hostId, preferLiveBridge]);
@@ -294,6 +398,7 @@ export function useCallSessionEngine(opts: {
     aiHost,
     liveHost,
     bridgeCall,
+    sessionId,
     remoteRef,
     localRef,
     disconnect,

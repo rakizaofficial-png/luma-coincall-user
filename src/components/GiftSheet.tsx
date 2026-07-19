@@ -24,14 +24,14 @@ export function GiftSheet({
   roomId?: string;
   callId?: string;
 }) {
-  const { spend, syncWallet, pushToast } = useApp();
+  const { spend, syncWallet, pushToast, displayName, userId } = useApp();
   const [sending, setSending] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const send = async (id: string, coins: number, emoji: string, name: string) => {
     if (busy) return;
-    const me = getDeviceUserId();
-    if (hostId && me === hostId) {
+    const me = getDeviceUserId() || userId;
+    if (hostId && me && me === hostId) {
       pushToast?.("Hosts cannot gift themselves!");
       return;
     }
@@ -42,11 +42,11 @@ export function GiftSheet({
           method: "POST",
           headers: {
             "Content-Type": "application/json",
-            "X-User-Id": getDeviceUserId(),
+            "X-User-Id": me,
           },
           body: JSON.stringify({
-            userId: getDeviceUserId(),
-            userName: "Luma Fan",
+            userId: me,
+            userName: displayName || "Luma Fan",
             hostId,
             giftId: id,
             roomId,
@@ -57,7 +57,7 @@ export function GiftSheet({
         if (!res.ok) throw new Error(data.error || "Gift failed");
         await syncWallet?.();
         try {
-          getRealtimeClient(getDeviceUserId()).sendGift({
+          getRealtimeClient(me).sendGift({
             roomId,
             toHostId: hostId,
             giftId: id,

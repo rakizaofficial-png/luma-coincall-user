@@ -18,6 +18,8 @@ export type LiveHost = {
   isOnCall: boolean;
   readyToCall?: boolean;
   workspaceMode?: "waiting_1v1" | "solo_calling";
+  /** Optional gender for female-only match filter */
+  gender?: string;
 };
 
 export type BridgeCall = {

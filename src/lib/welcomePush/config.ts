@@ -1,84 +1,94 @@
-/** Welcome Push Call Engine — conversion funnel state machine */
+/**
+ * Welcome Push Call Engine — conversion funnel configuration.
+ * Demo hosts are used only when no real female hosts are online.
+ */
 
-export type WelcomePushPhase =
-  | "IDLE"
-  | "INCOMING_CALL"
-  | "TEASER_PLAYING"
-  | "PAYWALL_BOOST"
-  | "DONE";
+import type { WelcomePaywallTier, WelcomePushHost } from "./types";
 
-export type WelcomePushHost = {
-  host_id: string;
-  name: string;
-  age: number;
-  avatar: string;
-  /** High-engagement teaser clip (cloud bucket or CDN) */
-  teaser_video_url: string;
-  country: string;
-};
+export type {
+  WelcomePushPhase,
+  WelcomePushHost,
+  WelcomePaywallTier,
+  WelcomeHostSource,
+  WelcomeRotationHistory,
+} from "./types";
 
-export type WelcomePaywallTier = {
-  id: string;
-  headline: string;
-  sub: string;
-  coins: number;
-  price: string;
-  neon: "green" | "pink" | "gold";
-  popular?: boolean;
-};
-
+/** @deprecated Prefer pickNextWelcomeCaller() — kept for type-compat imports */
 export const WELCOME_PUSH_HOST: WelcomePushHost = {
-  host_id: "ai_aisha_welcome",
-  name: "Aisha",
-  age: 22,
-  avatar: "https://i.pravatar.cc/800?u=aisha-luma-welcome-push",
-  // Replace with: ${NEXT_PUBLIC_AI_HOST_CDN}/ai_aisha_welcome/teaser.mp4
+  host_id: "sim_f_boot",
+  name: "Mira",
+  age: 23,
+  avatar:
+    "https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=900&h=1200&fit=crop&q=80",
   teaser_video_url:
     process.env.NEXT_PUBLIC_WELCOME_TEASER_URL ||
     (process.env.NEXT_PUBLIC_AI_HOST_CDN
       ? `${process.env.NEXT_PUBLIC_AI_HOST_CDN.replace(/\/$/, "")}/ai_aisha_welcome/teaser.mp4`
       : "https://storage.googleapis.com/gtv-videos-bucket/sample/ForBiggerJoyrides.mp4"),
-  country: "UAE",
+  country: "Korea",
+  flag: "🇰🇷",
+  language: "Korean · English",
+  bio: "Just got free — private video?",
+  interests: ["Fashion", "Travel"],
+  level: 12,
+  isVip: true,
+  isVerified: true,
+  isOnline: true,
+  durationPreview: "a few minutes",
+  message: "Hi, I'm online now.",
+  messageId: "m01",
+  source: "demo",
 };
 
-export const WELCOME_PAYWALL_TIERS: WelcomePaywallTier[] = [
-  {
-    id: "unlock_5",
-    headline: "Unlock 5 Mins",
-    sub: "Only $1 · jump back to Aisha",
-    coins: 50,
-    price: "$1.00",
-    neon: "green",
-  },
-  {
-    id: "popular_50",
-    headline: "Popular: 50 Coins",
-    sub: "Best first recharge · most chosen",
-    coins: 50,
-    price: "$0.99",
-    neon: "pink",
-    popular: true,
-  },
-  {
-    id: "boost_300",
-    headline: "Hot Boost · 300 Coins",
-    sub: "Talk longer · VIP frame unlock",
-    coins: 300,
-    price: "$4.99",
-    neon: "gold",
-  },
-];
+export function buildPaywallTiers(hostName: string): WelcomePaywallTier[] {
+  return [
+    {
+      id: "unlock_5",
+      headline: "Keep talking to her",
+      sub: `${hostName} is still on the line · unlock 5 mins`,
+      coins: 50,
+      price: "$1.00",
+      neon: "green",
+    },
+    {
+      id: "popular_50",
+      headline: "Most chosen · 50 Coins",
+      sub: `Jump back to ${hostName} before she leaves`,
+      coins: 50,
+      price: "$0.99",
+      neon: "pink",
+      popular: true,
+    },
+    {
+      id: "boost_300",
+      headline: "Stay longer · 300 Coins",
+      sub: "Private VIP minutes · she won’t wait forever",
+      coins: 300,
+      price: "$4.99",
+      neon: "gold",
+    },
+  ];
+}
+
+/** Static fallback tiers (prefer buildPaywallTiers) */
+export const WELCOME_PAYWALL_TIERS = buildPaywallTiers("her");
 
 export const WELCOME_PUSH_CONFIG = {
-  /** First lure after home loads */
-  launchDelayMs: 8_000,
-  /** Then repeat every 3 minutes */
-  repeatEveryMs: 3 * 60_000,
-  /** Incoming modal + ringtone auto-end after 30 seconds */
-  ringDurationMs: 30_000,
-  /** Teaser hard-cut timestamp */
-  teaserCutMs: 3500,
+  /** First lure after home / dashboard entry (3–5s) */
+  launchDelayMinMs: 3_000,
+  launchDelayMaxMs: 5_000,
+  /** Recurring lure — keep pressure without spam */
+  repeatEveryMinMs: 90_000,
+  repeatEveryMaxMs: 2 * 60_000 + 30_000,
+  /** Incoming modal + ringtone auto-end */
+  ringDurationMinMs: 22_000,
+  ringDurationMaxMs: 35_000,
+  /** Teaser hard-cut → recharge paywall (retention push) */
+  teaserCutMs: 3200,
   /** Paywall FOMO countdown */
-  offerSeconds: 59,
-  storageKey: "luma_welcome_push_v2",
+  offerSeconds: 45,
+  /** Don't reuse these many recent hosts / messages */
+  hostCooldownCount: 10,
+  messageCooldownCount: 14,
+  storageKey: "luma_welcome_push_v4",
 } as const;

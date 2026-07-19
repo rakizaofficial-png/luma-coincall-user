@@ -84,6 +84,8 @@ type AppStore = {
   addCoins: (amount: number, label?: string) => void;
   creditReward: (amount: number, label: string) => Promise<void>;
   syncWallet: () => Promise<import("@/lib/walletApi").WalletSnapshot>;
+  /** Update on-screen balance without Express (Firebase per-minute billing). */
+  applyLocalCoins: (balance: number) => void;
   updateDisplayName: (name: string) => Promise<void>;
   addXp: (amount: number) => void;
   toggleFollow: (id: string) => void;
@@ -145,14 +147,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const syncWallet = useCallback(async () => {
+    const local = ensureLocalProfile();
     const wallet = await fetchOrCreateWallet();
-    setUserId(wallet.userId);
-    setDisplayName(wallet.displayName || ensureLocalProfile().displayName);
-    setAvatarUrl(wallet.avatarUrl || ensureLocalProfile().avatarUrl);
+    // Isolate identity: never adopt another account's name/photo
+    if (wallet.userId && wallet.userId !== local.userId) {
+      setUserId(local.userId);
+      setDisplayName(local.displayName);
+      setAvatarUrl(local.avatarUrl);
+    } else {
+      setUserId(wallet.userId || local.userId);
+      setDisplayName(
+        wallet.displayName?.trim()
+          ? wallet.displayName
+          : local.displayName,
+      );
+      setAvatarUrl(wallet.avatarUrl || local.avatarUrl);
+    }
     setCoins(wallet.coinBalance);
     setXp(wallet.xp);
     setPremium(wallet.isPremium);
     return wallet;
+  }, []);
+
+  const applyLocalCoins = useCallback((balance: number) => {
+    setCoins(Math.max(0, Math.floor(balance)));
   }, []);
 
   const creditReward = useCallback(
@@ -480,6 +498,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addCoins,
       creditReward,
       syncWallet,
+      applyLocalCoins,
       updateDisplayName,
       addXp,
       toggleFollow,
@@ -527,6 +546,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       addCoins,
       creditReward,
       syncWallet,
+      applyLocalCoins,
       updateDisplayName,
       addXp,
       toggleFollow,

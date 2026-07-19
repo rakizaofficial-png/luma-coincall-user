@@ -26,9 +26,11 @@ import {
   switchUserCamera,
 } from "@/lib/agora";
 import { billCallMinute } from "@/lib/callBilling";
+import { transferCallMinuteFb } from "@/lib/firebaseWallet";
+import { isFirebaseReady } from "@/lib/firebase";
 import { effectiveRate, maxCallMinutes } from "@/lib/ledger";
 import { useApp } from "@/lib/store";
-import { spendCoinsApi } from "@/lib/walletApi";
+import { getDeviceUserId, spendCoinsApi } from "@/lib/walletApi";
 
 type FeedLine = { id: string; text: string; tone?: "system" | "gift" | "bill" };
 
@@ -58,6 +60,8 @@ export default function CallSessionClient({
     endFreeTrial,
     completeCallEngagement,
     completeGiftEngagement,
+    displayName: myDisplayName,
+    applyLocalCoins,
   } = useApp();
 
   const [trialMode, setTrialMode] = useState(false);
@@ -102,6 +106,7 @@ export default function CallSessionClient({
     displayAvatar,
     bridgeCall,
     liveHost,
+    sessionId,
   } = engine;
 
   const [secs, setSecs] = useState(0);
@@ -141,7 +146,8 @@ export default function CallSessionClient({
   }
 
   const hangUp = async () => {
-    await disconnect();
+    // Status → ended first so BOTH sides leave via RTDB listener
+    await disconnect({ reason: "user_hangup" });
     await stopUserAgoraCall();
     if (isConnected) void completeCallEngagement();
     pushToast("Call ended");
@@ -204,7 +210,80 @@ export default function CallSessionClient({
             if (billingBusyRef.current) return;
             billingBusyRef.current = true;
             try {
-              if (bridgeCall?.id && !isAi) {
+              const userId = getDeviceUserId();
+              const hostIdForBill =
+                bridgeCall?.hostId ||
+                liveHost?.id ||
+                aiHost?.host_id ||
+                id;
+              const billSessionId =
+                sessionId || bridgeCall?.id || `ai_${id}`;
+
+              // Free-tier Firebase RTDB transaction (no Cloud Functions)
+              if (isFirebaseReady() && userId && hostIdForBill) {
+                const result = await transferCallMinuteFb({
+                  userId,
+                  hostId: hostIdForBill,
+                  amount: chargeRate,
+                  callId: billSessionId,
+                  userName: myDisplayName,
+                  hostName: displayName,
+                });
+                if (result.ok) {
+                  const amt = result.amount ?? chargeRate;
+                  setDeductFlash(amt);
+                  setTimeout(() => setDeductFlash(null), 900);
+                  pushFeed(`−${amt} coins · 1 min`, "bill");
+                  if (typeof result.userBalance === "number") {
+                    applyLocalCoins(result.userBalance);
+                  }
+                  const bal = result.userBalance ?? coins - amt;
+                  if (bal < chargeRate) {
+                    pushToast("Coins exhausted. Disconnecting...");
+                    await hangUpRef.current();
+                  } else if (maxCallMinutes(bal, chargeRate) <= 1) {
+                    lowBalanceWarnedRef.current = false;
+                  }
+                } else if (result.exhausted) {
+                  pushToast("Coins exhausted. Disconnecting...");
+                  await hangUpRef.current();
+                } else {
+                  // Firebase failed — Express fallback (single path, no double charge)
+                  if (bridgeCall?.id && !isAi) {
+                    const expr = await billCallMinute(bridgeCall.id);
+                    if (expr.ok) {
+                      const amt = expr.amount ?? chargeRate;
+                      setDeductFlash(amt);
+                      setTimeout(() => setDeductFlash(null), 900);
+                      pushFeed(`−${amt} coins · 1 min`, "bill");
+                      await syncWallet?.();
+                      const bal = expr.coinBalance ?? coins - amt;
+                      if (bal < chargeRate) {
+                        pushToast("Coins exhausted. Disconnecting...");
+                        await hangUpRef.current();
+                      }
+                    } else if (expr.exhausted) {
+                      pushToast("Coins exhausted. Disconnecting...");
+                      await hangUpRef.current();
+                    } else {
+                      pushToast(expr.error || result.error || "Billing failed");
+                    }
+                  } else {
+                    const ok = await spendAsync(
+                      chargeRate,
+                      `−${chargeRate} coins · 1 min`,
+                    );
+                    if (ok) {
+                      setDeductFlash(chargeRate);
+                      setTimeout(() => setDeductFlash(null), 900);
+                      pushFeed(`−${chargeRate} coins · 1 min`, "bill");
+                    } else {
+                      pushToast("Coins exhausted. Disconnecting...");
+                      await hangUpRef.current();
+                    }
+                  }
+                }
+              } else if (bridgeCall?.id && !isAi) {
                 const result = await billCallMinute(bridgeCall.id);
                 if (result.ok) {
                   const amt = result.amount ?? chargeRate;
@@ -226,7 +305,10 @@ export default function CallSessionClient({
                   pushToast(result.error || "Billing failed");
                 }
               } else {
-                const ok = await spendAsync(chargeRate, `−${chargeRate} coins · 1 min`);
+                const ok = await spendAsync(
+                  chargeRate,
+                  `−${chargeRate} coins · 1 min`,
+                );
                 if (ok) {
                   setDeductFlash(chargeRate);
                   setTimeout(() => setDeductFlash(null), 900);
@@ -266,10 +348,17 @@ export default function CallSessionClient({
     trialMode,
     endFreeTrial,
     bridgeCall?.id,
+    bridgeCall?.hostId,
     isAi,
     syncWallet,
     id,
     coins,
+    sessionId,
+    liveHost?.id,
+    aiHost?.host_id,
+    myDisplayName,
+    displayName,
+    applyLocalCoins,
   ]);
 
   useEffect(() => {

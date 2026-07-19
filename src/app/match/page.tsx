@@ -6,26 +6,46 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { ArrowLeft, EyeOff, Shuffle, Sparkles, Zap } from "lucide-react";
 import { fetchLiveHosts, type LiveHost } from "@/lib/api";
-import { creators } from "@/lib/data";
+import { filterFemaleHosts } from "@/lib/femaleHosts";
 import { useApp } from "@/lib/store";
+import {
+  ensurePremiumFemalePool,
+  isAutoCallEligibleProfile,
+} from "@/lib/welcomePush/premiumFemaleGenerator";
 
-/** Dedicated Match page — instant / blind / free trial matching */
+/** Dedicated Match page — instant / blind / free trial matching (female hosts only) */
 export default function MatchPage() {
   const router = useRouter();
   const { isPremium, spend, pushToast, freeTrialAvailable } = useApp();
   const [readyCount, setReadyCount] = useState(0);
   const [loading, setLoading] = useState(false);
 
-  const callDemo = useMemo(
-    () => creators.filter((c) => c.online && !c.live),
-    [],
-  );
+  const callDemo = useMemo(() => {
+    const pool = ensurePremiumFemalePool();
+    return pool
+      .filter((p) => isAutoCallEligibleProfile(p))
+      .slice(0, 12)
+      .map((p) => ({
+        id: p.host_id,
+        name: p.name,
+        callRate: 80 + (p.level % 5) * 5,
+        gender: "female" as const,
+        avatarUrl: p.avatar,
+      }));
+  }, []);
 
   const loadPool = useCallback(async (): Promise<LiveHost[]> => {
     try {
       const all = await fetchLiveHosts();
-      const pool = all.filter(
-        (h) => h.isOnline && !h.isLive && !h.isOnCall,
+      const pool = filterFemaleHosts(
+        all.filter((h) => h.isOnline && !h.isLive && !h.isOnCall),
+      ).filter((h) =>
+        isAutoCallEligibleProfile({
+          id: h.id,
+          name: h.name,
+          gender: h.gender || "female",
+          avatar: h.avatarUrl,
+        }),
       );
       setReadyCount(pool.length);
       return pool;
@@ -52,14 +72,24 @@ export default function MatchPage() {
             isOnline: true,
             isLive: false,
             isOnCall: false,
+            gender: "female",
+            avatarUrl: c.avatarUrl,
           }));
 
-      if (!pool.length) {
-        pushToast("No hosts available — try again soon");
+      const femalePool = filterFemaleHosts(pool).filter((h) =>
+        isAutoCallEligibleProfile({
+          id: h.id,
+          name: h.name,
+          gender: h.gender || "female",
+          avatar: h.avatarUrl,
+        }),
+      );
+      if (!femalePool.length) {
+        pushToast("No female hosts available — try again soon");
         return;
       }
 
-      const pick = pool[Math.floor(Math.random() * pool.length)]!;
+      const pick = femalePool[Math.floor(Math.random() * femalePool.length)]!;
       const bridged = apiPool.some((h) => h.id === pick.id);
 
       if (mode === "trial") {

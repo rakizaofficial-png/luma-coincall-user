@@ -1,11 +1,11 @@
 import { fetchLiveHosts, type LiveHost } from "@/lib/api";
+import { filterFemaleHosts, isFemaleHostProfile } from "@/lib/femaleHosts";
 import { resolveAiHostForRequest } from "./catalog";
 import type { CallRouteDecision } from "./types";
 
 /**
  * Backend routing action (client-callable + mirrored by /api/call-route).
- * If zero real hosts are online → AI Host Database.
- * If the requested host is online → Agora live path.
+ * Automated / simulated paths are female-only.
  */
 export async function routeOneToOneCall(
   requestedHostId: string,
@@ -18,16 +18,28 @@ export async function routeOneToOneCall(
   }
 
   const online = hosts.filter((h) => h.isOnline && !h.isOnCall);
-  const realHostsOnline = online.length;
+  const femaleOnline = filterFemaleHosts(online);
+  const realHostsOnline = femaleOnline.length;
   const matched = online.find((h) => h.id === requestedHostId) ?? null;
 
-  if (matched) {
+  if (matched && isFemaleHostProfile(matched)) {
     return {
       transport: "agora_live",
-      reason: "Requested host is online — Agora bridge",
+      reason: "Requested female host is online — Agora bridge",
       realHostsOnline,
       aiHost: null,
       liveHostId: matched.id,
+    };
+  }
+
+  if (matched && !isFemaleHostProfile(matched)) {
+    const aiHost = resolveAiHostForRequest(requestedHostId);
+    return {
+      transport: "ai_prerecorded",
+      reason: "Male host blocked from auto route — female AI fallback",
+      realHostsOnline,
+      aiHost,
+      liveHostId: null,
     };
   }
 
@@ -35,20 +47,17 @@ export async function routeOneToOneCall(
     const aiHost = resolveAiHostForRequest(requestedHostId);
     return {
       transport: "ai_prerecorded",
-      reason: "Zero real hosts online — AI Host Database fallback",
+      reason: "Zero female hosts online — AI Host Database fallback",
       realHostsOnline: 0,
       aiHost,
       liveHostId: null,
     };
   }
 
-  // Real hosts exist but requested one is busy/offline → still fall back to AI
-  // so the user always gets a seamless “live” experience.
   const aiHost = resolveAiHostForRequest(requestedHostId);
   return {
     transport: "ai_prerecorded",
-    reason:
-      "Requested host unavailable — AI fallback (other hosts online but not this id)",
+    reason: "Requested host unavailable — female AI fallback",
     realHostsOnline,
     aiHost,
     liveHostId: null,

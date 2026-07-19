@@ -24,6 +24,8 @@ export type AiHostRecord = {
   cost_per_minute: number;
   country?: string;
   tags?: string[];
+  /** Always female for automated / simulated calls */
+  gender?: "female" | "male";
 };
 
 export type CallTransport = "agora_live" | "ai_prerecorded";

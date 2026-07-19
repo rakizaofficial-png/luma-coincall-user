@@ -1,49 +1,67 @@
 "use client";
 
+import { useEffect } from "react";
 import { AnimatePresence } from "framer-motion";
 import { usePathname } from "next/navigation";
 import { IncomingCallLure } from "@/components/welcome/IncomingCallLure";
 import { TeaserCallPlayer } from "@/components/welcome/TeaserCallPlayer";
 import { RechargePaywallSheet } from "@/components/welcome/RechargePaywallSheet";
 import { useWelcomePushCall } from "@/hooks/useWelcomePushCall";
+import { ensurePremiumFemalePool } from "@/lib/welcomePush/premiumFemaleGenerator";
 
 /**
- * Welcome Push Call Engine — production shell injection.
- * State loop: IDLE → INCOMING_CALL → TEASER_PLAYING → PAYWALL_BOOST → DONE
+ * Simulated premium female incoming-call engine.
+ * Fires 3–5s after home/dashboard entry → teaser → recharge paywall.
  */
 export function WelcomePushEngine() {
   const pathname = usePathname();
-  const onHome = pathname === "/" || pathname === "";
+  const onDashboard =
+    pathname === "/" ||
+    pathname === "" ||
+    pathname === "/call" ||
+    pathname === "/match";
+
+  useEffect(() => {
+    if (!onDashboard) return;
+    ensurePremiumFemalePool();
+  }, [onDashboard]);
 
   const {
     phase,
     host,
+    statusLine,
     offerLeft,
     acceptIncoming,
     rejectIncoming,
     closePaywall,
     hardDisconnectTeaser,
-  } = useWelcomePushCall({ enabled: onHome });
+  } = useWelcomePushCall({ enabled: onDashboard });
 
-  // Once funnel starts, keep overlays even if path flickers; hide only when idle
   if (phase === "IDLE") return null;
 
   return (
     <>
-      <AnimatePresence>
+      <AnimatePresence mode="wait">
         {phase === "INCOMING_CALL" && (
           <IncomingCallLure
-            key="incoming"
+            key={`incoming-${host.host_id}-${host.messageId}`}
             host={host}
+            statusLine={statusLine}
             onAccept={acceptIncoming}
             onReject={rejectIncoming}
           />
         )}
       </AnimatePresence>
 
-      {phase === "TEASER_PLAYING" && (
-        <TeaserCallPlayer host={host} onHardCut={hardDisconnectTeaser} />
-      )}
+      <AnimatePresence>
+        {phase === "TEASER_PLAYING" && (
+          <TeaserCallPlayer
+            key={`teaser-${host.host_id}`}
+            host={host}
+            onHardCut={hardDisconnectTeaser}
+          />
+        )}
+      </AnimatePresence>
 
       <RechargePaywallSheet
         open={phase === "PAYWALL_BOOST"}
