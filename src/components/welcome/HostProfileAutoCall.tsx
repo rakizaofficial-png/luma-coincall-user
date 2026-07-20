@@ -17,36 +17,40 @@ import {
 } from "@/lib/welcomePush/ringtone";
 import { pickRandomStatusLine } from "@/lib/welcomePush/uiCopy";
 import { nextRingDurationMs } from "@/lib/welcomePush/rotation";
-import { useApp } from "@/lib/store";
 import type { DiscoverHost } from "@/lib/discoverHosts";
 
 const PROFILE_RING_DELAY_MS = 2_400;
 
 /**
- * When the user opens a host profile, auto-fire an incoming call
- * from that host after a short delay (adult glam pack + host DP).
+ * Host profile auto-call: accept → 30s free preview → recharge popup → cut if no pay.
  */
 export function HostProfileAutoCall({ host }: { host: DiscoverHost }) {
-  const { coins } = useApp();
-  const coinsRef = useRef(coins);
-  coinsRef.current = coins;
-
   const [phase, setPhase] = useState<WelcomePushPhase>("IDLE");
   const [caller, setCaller] = useState<WelcomePushHost | null>(null);
   const [statusLine, setStatusLine] = useState("Ringing…");
-  const [offerLeft, setOfferLeft] = useState(45);
+  const [offerLeft, setOfferLeft] = useState(WELCOME_PUSH_CONFIG.offerSeconds);
+  const [previewLeft, setPreviewLeft] = useState(30);
   const firedForId = useRef<string | null>(null);
   const ringTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const teaserTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewTick = useRef<ReturnType<typeof setInterval> | null>(null);
   const offerTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const hostRef = useRef(host);
   hostRef.current = host;
 
+  const cutCall = () => {
+    stopWelcomeRingTone();
+    if (ringTimer.current) clearTimeout(ringTimer.current);
+    if (teaserTimer.current) clearTimeout(teaserTimer.current);
+    if (previewTick.current) clearInterval(previewTick.current);
+    if (offerTimer.current) clearInterval(offerTimer.current);
+    setPhase("IDLE");
+  };
+
   useEffect(() => {
     if (!host?.id) return;
     if (firedForId.current === host.id) return;
-    // Wait until profile hydrated (avoid "Host" + empty DP)
     if (host.name === "Host") return;
 
     const hostId = host.id;
@@ -84,12 +88,31 @@ export function HostProfileAutoCall({ host }: { host: DiscoverHost }) {
   }, [phase]);
 
   useEffect(() => {
+    if (phase !== "TEASER_PLAYING") {
+      if (previewTick.current) {
+        clearInterval(previewTick.current);
+        previewTick.current = null;
+      }
+      return;
+    }
+    const total = Math.round(WELCOME_PUSH_CONFIG.teaserCutMs / 1000);
+    setPreviewLeft(total);
+    previewTick.current = setInterval(() => {
+      setPreviewLeft((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => {
+      if (previewTick.current) clearInterval(previewTick.current);
+    };
+  }, [phase]);
+
+  useEffect(() => {
     if (phase !== "PAYWALL_BOOST") return;
     setOfferLeft(WELCOME_PUSH_CONFIG.offerSeconds);
     offerTimer.current = setInterval(() => {
       setOfferLeft((s) => {
         if (s <= 1) {
           if (offerTimer.current) clearInterval(offerTimer.current);
+          queueMicrotask(() => cutCall());
           return 0;
         }
         return s - 1;
@@ -105,6 +128,7 @@ export function HostProfileAutoCall({ host }: { host: DiscoverHost }) {
       stopWelcomeRingTone();
       if (ringTimer.current) clearTimeout(ringTimer.current);
       if (teaserTimer.current) clearTimeout(teaserTimer.current);
+      if (previewTick.current) clearInterval(previewTick.current);
       if (offerTimer.current) clearInterval(offerTimer.current);
     },
     [],
@@ -113,24 +137,18 @@ export function HostProfileAutoCall({ host }: { host: DiscoverHost }) {
   if (phase === "IDLE" || !caller) return null;
 
   const reject = () => {
-    stopWelcomeRingTone();
-    setPhase("IDLE");
+    cutCall();
   };
 
   const accept = () => {
     stopWelcomeRingTone();
     if (ringTimer.current) clearTimeout(ringTimer.current);
-    if (coinsRef.current <= 0) {
-      setPhase("PAYWALL_BOOST");
-      return;
-    }
+    // Always 30s free preview → then recharge (cut if no pay)
     setPhase("TEASER_PLAYING");
     teaserTimer.current = setTimeout(() => {
       setPhase("PAYWALL_BOOST");
     }, WELCOME_PUSH_CONFIG.teaserCutMs);
   };
-
-  const closePaywall = () => setPhase("IDLE");
 
   return (
     <>
@@ -151,6 +169,7 @@ export function HostProfileAutoCall({ host }: { host: DiscoverHost }) {
           <TeaserCallPlayer
             key={`profile-teaser-${caller.host_id}`}
             host={caller}
+            previewLeft={previewLeft}
             onHardCut={() => {
               if (teaserTimer.current) clearTimeout(teaserTimer.current);
               setPhase("PAYWALL_BOOST");
@@ -163,7 +182,7 @@ export function HostProfileAutoCall({ host }: { host: DiscoverHost }) {
         open={phase === "PAYWALL_BOOST"}
         host={caller}
         offerLeft={offerLeft}
-        onClose={closePaywall}
+        onClose={cutCall}
       />
     </>
   );

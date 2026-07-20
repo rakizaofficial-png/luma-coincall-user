@@ -33,7 +33,7 @@ export const WELCOME_PUSH_HOST: WelcomePushHost = {
   isVip: true,
   isVerified: true,
   isOnline: true,
-  durationPreview: "a few minutes",
+  durationPreview: "30 sec free",
   message: "Hi, I'm online now.",
   messageId: "m01",
   source: "demo",
@@ -86,13 +86,13 @@ export const WELCOME_PUSH_CONFIG = {
   /** Incoming modal + ringtone auto-end */
   ringDurationMinMs: 22_000,
   ringDurationMaxMs: 35_000,
-  /** Teaser hard-cut → recharge paywall (when user has coins) — 30s mobile fake call */
+  /** 30s free preview after Accept → then recharge popup */
   teaserCutMs: 30_000,
-  /** Paywall FOMO countdown */
-  offerSeconds: 45,
+  /** Paywall wait — if no recharge, call cuts */
+  offerSeconds: 20,
   /** Don't reuse these many recent hosts / messages */
   hostCooldownCount: 10,
   messageCooldownCount: 14,
   /** Bump when media / timing rules change */
-  storageKey: "luma_welcome_push_v8_asian",
+  storageKey: "luma_welcome_push_v9_preview30",
 } as const;

@@ -7,18 +7,20 @@ import type { WelcomePushHost } from "@/lib/welcomePush/config";
 import { pickRandomConnectLine } from "@/lib/welcomePush/uiCopy";
 
 /**
- * Connected automated-call view — host profile photo only (no teaser video).
+ * 30s free preview — host profile only, then parent opens recharge / cuts call.
  */
 export function TeaserCallPlayer({
   host,
+  previewLeft = 30,
 }: {
   host: WelcomePushHost;
+  previewLeft?: number;
   onHardCut?: () => void;
 }) {
   const [connectLine] = useState(() => pickRandomConnectLine());
 
   const liveLabel = useMemo(
-    () => (host.source === "live" ? "Live · Private" : "Connected · Private"),
+    () => (host.source === "live" ? "Live · Preview" : "Free preview"),
     [host.source],
   );
 
@@ -34,7 +36,12 @@ export function TeaserCallPlayer({
         className="absolute inset-0"
         initial={{ scale: 1.05 }}
         animate={{ scale: 1.12 }}
-        transition={{ duration: 18, ease: "linear", repeat: Infinity, repeatType: "reverse" }}
+        transition={{
+          duration: 18,
+          ease: "linear",
+          repeat: Infinity,
+          repeatType: "reverse",
+        }}
       >
         <Image
           src={host.avatar}
@@ -60,6 +67,17 @@ export function TeaserCallPlayer({
         </span>
       </motion.div>
 
+      <motion.div
+        className="absolute right-4 top-[max(0.75rem,env(safe-area-inset-top))] z-10 rounded-full border border-gold/40 bg-black/50 px-3 py-1.5 backdrop-blur"
+        key={previewLeft}
+        initial={{ scale: 0.92 }}
+        animate={{ scale: 1 }}
+      >
+        <span className="font-display text-sm font-extrabold tabular-nums text-gold">
+          {String(previewLeft).padStart(2, "0")}s
+        </span>
+      </motion.div>
+
       <div className="absolute bottom-10 left-0 right-0 z-10 flex flex-col items-center px-6">
         <motion.div
           className="mb-3 overflow-hidden rounded-full ring-2 ring-cyan/50"
@@ -78,8 +96,8 @@ export function TeaserCallPlayer({
           {host.name}
         </p>
         <p className="mt-1 text-xs font-semibold text-cyan/80">{connectLine}</p>
-        <p className="mt-1 text-[10px] text-white/50">
-          {host.flag} {host.country} · {host.durationPreview}
+        <p className="mt-2 text-center text-[11px] font-semibold text-white/60">
+          Free preview · recharge after {previewLeft}s to keep talking
         </p>
       </div>
     </motion.div>

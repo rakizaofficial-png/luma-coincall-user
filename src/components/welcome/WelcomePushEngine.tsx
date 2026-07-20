@@ -39,6 +39,7 @@ export function WelcomePushEngine() {
     host,
     statusLine,
     offerLeft,
+    previewLeft,
     acceptIncoming,
     rejectIncoming,
     closePaywall,
@@ -66,6 +67,7 @@ export function WelcomePushEngine() {
           <TeaserCallPlayer
             key={`teaser-${host.host_id}`}
             host={host}
+            previewLeft={previewLeft}
             onHardCut={hardDisconnectTeaser}
           />
         )}

@@ -22,10 +22,9 @@ import { useApp } from "@/lib/store";
 
 /**
  * Lifecycle:
- * IDLE → (1–2 min browse/inactivity) → INCOMING_CALL (ringtone + video bg)
- *      → Accept + 0 coins → PAYWALL (blurred call) immediately
- *      → Accept + coins → TEASER → PAYWALL → IDLE
- *      → Reject / timeout → IDLE (schedule next 1–2 min)
+ * IDLE → INCOMING_CALL → Accept → TEASER (30s free preview)
+ *      → PAYWALL_BOOST (recharge popup)
+ *      → recharge OR offer expires / dismiss → call cut (IDLE)
  */
 export function useWelcomePushCall(opts: { enabled: boolean }) {
   const { coins } = useApp();
@@ -38,7 +37,9 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
   const [offerLeft, setOfferLeft] = useState<number>(
     WELCOME_PUSH_CONFIG.offerSeconds,
   );
+  const [previewLeft, setPreviewLeft] = useState(30);
   const teaserTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previewTick = useRef<ReturnType<typeof setInterval> | null>(null);
   const offerTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const ringTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const repeatTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -54,6 +55,10 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
     if (teaserTimer.current) {
       clearTimeout(teaserTimer.current);
       teaserTimer.current = null;
+    }
+    if (previewTick.current) {
+      clearInterval(previewTick.current);
+      previewTick.current = null;
     }
     if (offerTimer.current) {
       clearInterval(offerTimer.current);
@@ -194,7 +199,7 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
     };
   }, [phase, scheduleNext]);
 
-  // Paywall FOMO countdown
+  // Paywall FOMO countdown — expire = call cut
   useEffect(() => {
     if (phase !== "PAYWALL_BOOST") return;
     setOfferLeft(WELCOME_PUSH_CONFIG.offerSeconds);
@@ -202,6 +207,12 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
       setOfferLeft((s) => {
         if (s <= 1) {
           if (offerTimer.current) clearInterval(offerTimer.current);
+          // Cut call when offer ends without recharge
+          queueMicrotask(() => {
+            clearTimers();
+            setPhase("IDLE");
+            scheduleNext(nextRepeatDelayMs());
+          });
           return 0;
         }
         return s - 1;
@@ -209,6 +220,28 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
     }, 1000);
     return () => {
       if (offerTimer.current) clearInterval(offerTimer.current);
+    };
+  }, [phase, clearTimers, scheduleNext]);
+
+  // 30s preview tick for UI countdown
+  useEffect(() => {
+    if (phase !== "TEASER_PLAYING") {
+      if (previewTick.current) {
+        clearInterval(previewTick.current);
+        previewTick.current = null;
+      }
+      return;
+    }
+    const total = Math.round(WELCOME_PUSH_CONFIG.teaserCutMs / 1000);
+    setPreviewLeft(total);
+    previewTick.current = setInterval(() => {
+      setPreviewLeft((s) => Math.max(0, s - 1));
+    }, 1000);
+    return () => {
+      if (previewTick.current) {
+        clearInterval(previewTick.current);
+        previewTick.current = null;
+      }
     };
   }, [phase]);
 
@@ -226,11 +259,7 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
       clearTimeout(ringTimer.current);
       ringTimer.current = null;
     }
-    // Monetization hook: zero balance → recharge immediately (blurred call)
-    if (coinsRef.current <= 0) {
-      setPhase("PAYWALL_BOOST");
-      return;
-    }
+    // Always grant 30s free preview, then recharge popup (call cuts if no pay)
     setPhase("TEASER_PLAYING");
     teaserTimer.current = setTimeout(() => {
       setPhase("PAYWALL_BOOST");
@@ -238,6 +267,7 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
   }, []);
 
   const closePaywall = useCallback(() => {
+    // Dismiss without recharge → cut call
     clearTimers();
     setPhase("IDLE");
     scheduleNext(nextRepeatDelayMs());
@@ -253,6 +283,7 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
     host,
     statusLine,
     offerLeft,
+    previewLeft,
     acceptIncoming,
     rejectIncoming,
     closePaywall,

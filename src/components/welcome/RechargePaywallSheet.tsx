@@ -93,8 +93,8 @@ export function RechargePaywallSheet({
                   <Zap className="h-3.5 w-3.5" /> Private call paused
                 </p>
                 <h2 className="mt-1 font-display text-[1.35rem] font-extrabold leading-snug text-sand">
-                  {host.name} is still waiting! Coins ran out — recharge to keep
-                  the private call going.
+                  30s preview ended — recharge to keep talking with {host.name},
+                  or the call will cut.
                 </h2>
               </div>
             </div>
@@ -148,7 +148,7 @@ export function RechargePaywallSheet({
               onClick={onClose}
               className="mt-4 w-full py-2 text-center text-xs font-semibold text-white/45"
             >
-              Maybe later
+              End call · no recharge
             </button>
           </motion.div>
         </>
