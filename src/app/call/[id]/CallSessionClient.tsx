@@ -153,7 +153,24 @@ export default function CallSessionClient({
     pushToast("Call ended");
     router.push("/call");
   };
-  hangUpRef.current = hangUp;
+
+  useEffect(() => {
+    hangUpRef.current = hangUp;
+  });
+
+  const coinsRef = useRef(coins);
+  const trialModeRef = useRef(trialMode);
+  const chargeRateRef = useRef(chargeRate);
+  const secsRef = useRef(0);
+  useEffect(() => {
+    coinsRef.current = coins;
+  }, [coins]);
+  useEffect(() => {
+    trialModeRef.current = trialMode;
+  }, [trialMode]);
+  useEffect(() => {
+    chargeRateRef.current = chargeRate;
+  }, [chargeRate]);
 
   useEffect(() => {
     if (maxCallMinutes(coins, chargeRate) > 1) {
@@ -164,211 +181,214 @@ export default function CallSessionClient({
   useEffect(() => {
     if (!isConnected) return;
 
+    secsRef.current = 0;
+    setSecs(0);
+
     const tick = setInterval(() => {
-      setSecs((s) => {
-        const next = s + 1;
+      // Never call pushToast / other store updates inside a setState updater —
+      // that updates AppProvider while CallSessionClient is rendering.
+      const next = secsRef.current + 1;
+      secsRef.current = next;
+      setSecs(next);
 
-        if (trialMode && !trialEndedRef.current && next >= FREE_TRIAL_SECONDS) {
-          trialEndedRef.current = true;
-          billingPausedRef.current = true;
-          endFreeTrial();
-          setTrialMode(false);
-          setTrialPaywall(true);
-          return next;
-        }
+      const bal = coinsRef.current;
+      const charge = chargeRateRef.current;
+      const trial = trialModeRef.current;
 
-        if (trialMode || billingPausedRef.current) {
-          return next;
-        }
+      if (trial && !trialEndedRef.current && next >= FREE_TRIAL_SECONDS) {
+        trialEndedRef.current = true;
+        billingPausedRef.current = true;
+        endFreeTrial();
+        setTrialMode(false);
+        setTrialPaywall(true);
+        return;
+      }
 
-        // 30s warning before balance can no longer cover another minute
-        const minutesLeft = maxCallMinutes(coins, chargeRate);
-        const secIntoMin = next % 60;
-        const secsUntilExhaust = minutesLeft * 60 - secIntoMin;
-        if (
-          minutesLeft >= 1 &&
-          secsUntilExhaust <= 30 &&
-          secsUntilExhaust > 0 &&
-          !lowBalanceWarnedRef.current
-        ) {
-          lowBalanceWarnedRef.current = true;
-          setLowBalanceOpen(true);
-          pushToast(
-            "Your balance is running low. Please recharge to continue the call.",
-          );
-        }
+      if (trial || billingPausedRef.current) {
+        return;
+      }
 
-        // Strict: cannot afford host rate → disconnect both sides
-        if (coins < chargeRate && next > 2) {
-          pushToast("Insufficient balance, please recharge");
-          void hangUpRef.current();
-          return next;
-        }
+      // 30s warning before balance can no longer cover another minute
+      const minutesLeft = maxCallMinutes(bal, charge);
+      const secIntoMin = next % 60;
+      const secsUntilExhaust = minutesLeft * 60 - secIntoMin;
+      if (
+        minutesLeft >= 1 &&
+        secsUntilExhaust <= 30 &&
+        secsUntilExhaust > 0 &&
+        !lowBalanceWarnedRef.current
+      ) {
+        lowBalanceWarnedRef.current = true;
+        setLowBalanceOpen(true);
+        pushToast(
+          "Your balance is running low. Please recharge to continue the call.",
+        );
+      }
 
-        if (next > 0 && next % 60 === 0) {
-          void (async () => {
-            if (billingBusyRef.current) return;
-            billingBusyRef.current = true;
-            try {
-              const userId = getDeviceUserId();
-              const hostIdForBill =
-                bridgeCall?.hostId ||
-                liveHost?.id ||
-                aiHost?.host_id ||
-                id;
-              const billSessionId =
-                sessionId || bridgeCall?.id || `ai_${id}`;
+      // Strict: cannot afford host rate → disconnect both sides
+      if (bal < charge && next > 2) {
+        pushToast("Insufficient balance, please recharge");
+        void hangUpRef.current();
+        return;
+      }
 
-              // Free-tier Firebase RTDB transaction (no Cloud Functions)
-              if (isFirebaseReady() && userId && hostIdForBill) {
-                const result = await transferCallMinuteFb({
-                  userId,
-                  hostId: hostIdForBill,
-                  amount: chargeRate,
-                  callId: billSessionId,
-                  userName: myDisplayName,
-                  hostName: displayName,
-                });
-                if (result.ok) {
-                  const amt = result.amount ?? chargeRate;
-                  setDeductFlash(amt);
-                  setTimeout(() => setDeductFlash(null), 900);
-                  pushFeed(`−${amt} coins · 1 min`, "bill");
-                  if (typeof result.userBalance === "number") {
-                    applyLocalCoins(result.userBalance);
-                  }
-                  // Mirror Express ledger so later syncWallet cannot restore coins
-                  try {
-                    await spendCoinsApi({
-                      amount: amt,
-                      reason: `call_minute_fb_mirror_${billSessionId}`,
-                      meta: { hostId: hostIdForBill, mirroredFrom: "firebase" },
-                    });
-                  } catch {
-                    /* Express may already be lower — UI trusts Firebase balance */
-                  }
-                  const bal = result.userBalance ?? coins - amt;
-                  if (bal < chargeRate) {
-                    pushToast("Coins exhausted. Disconnecting...");
-                    await hangUpRef.current();
-                  } else if (maxCallMinutes(bal, chargeRate) <= 1) {
-                    lowBalanceWarnedRef.current = false;
-                  }
-                } else if (result.exhausted) {
+      if (next > 0 && next % 60 === 0) {
+        void (async () => {
+          if (billingBusyRef.current) return;
+          billingBusyRef.current = true;
+          try {
+            const userId = getDeviceUserId();
+            const hostIdForBill =
+              bridgeCall?.hostId || liveHost?.id || aiHost?.host_id || id;
+            const billSessionId = sessionId || bridgeCall?.id || `ai_${id}`;
+            const chargeNow = chargeRateRef.current;
+            const coinsNow = coinsRef.current;
+
+            // Free-tier Firebase RTDB transaction (no Cloud Functions)
+            if (isFirebaseReady() && userId && hostIdForBill) {
+              const result = await transferCallMinuteFb({
+                userId,
+                hostId: hostIdForBill,
+                amount: chargeNow,
+                callId: billSessionId,
+                userName: myDisplayName,
+                hostName: displayName,
+              });
+              if (result.ok) {
+                const amt = result.amount ?? chargeNow;
+                setDeductFlash(amt);
+                setTimeout(() => setDeductFlash(null), 900);
+                pushFeed(`−${amt} coins · 1 min`, "bill");
+                if (typeof result.userBalance === "number") {
+                  applyLocalCoins(result.userBalance);
+                }
+                // Mirror Express ledger so later syncWallet cannot restore coins
+                try {
+                  await spendCoinsApi({
+                    amount: amt,
+                    reason: `call_minute_fb_mirror_${billSessionId}`,
+                    meta: { hostId: hostIdForBill, mirroredFrom: "firebase" },
+                  });
+                } catch {
+                  /* Express may already be lower — UI trusts Firebase balance */
+                }
+                const nextBal = result.userBalance ?? coinsNow - amt;
+                if (nextBal < chargeNow) {
                   pushToast("Coins exhausted. Disconnecting...");
                   await hangUpRef.current();
-                } else {
-                  // Firebase failed — Express fallback (single path, no double charge)
-                  if (bridgeCall?.id && !isAi) {
-                    const expr = await billCallMinute(bridgeCall.id);
-                    if (expr.ok) {
-                      const amt = expr.amount ?? chargeRate;
-                      setDeductFlash(amt);
-                      setTimeout(() => setDeductFlash(null), 900);
-                      pushFeed(`−${amt} coins · 1 min`, "bill");
-                      await syncWallet?.();
-                      const bal = expr.coinBalance ?? coins - amt;
-                      if (bal < chargeRate) {
-                        pushToast("Coins exhausted. Disconnecting...");
-                        await hangUpRef.current();
-                      }
-                    } else if (expr.exhausted) {
-                      pushToast("Coins exhausted. Disconnecting...");
-                      await hangUpRef.current();
-                    } else {
-                      pushToast(expr.error || result.error || "Billing failed");
-                    }
-                  } else {
-                    const ok = await spendAsync(
-                      chargeRate,
-                      `−${chargeRate} coins · 1 min`,
-                    );
-                    if (ok) {
-                      setDeductFlash(chargeRate);
-                      setTimeout(() => setDeductFlash(null), 900);
-                      pushFeed(`−${chargeRate} coins · 1 min`, "bill");
-                    } else {
-                      pushToast("Coins exhausted. Disconnecting...");
-                      await hangUpRef.current();
-                    }
-                  }
+                } else if (maxCallMinutes(nextBal, chargeNow) <= 1) {
+                  lowBalanceWarnedRef.current = false;
                 }
-              } else if (bridgeCall?.id && !isAi) {
-                const result = await billCallMinute(bridgeCall.id);
-                if (result.ok) {
-                  const amt = result.amount ?? chargeRate;
-                  setDeductFlash(amt);
-                  setTimeout(() => setDeductFlash(null), 900);
-                  pushFeed(`−${amt} coins · 1 min`, "bill");
-                  await syncWallet?.();
-                  const bal = result.coinBalance ?? coins - amt;
-                  if (bal < chargeRate) {
-                    pushToast("Coins exhausted. Disconnecting...");
-                    await hangUpRef.current();
-                  } else if (maxCallMinutes(bal, chargeRate) <= 1) {
-                    lowBalanceWarnedRef.current = false;
-                  }
-                } else if (result.exhausted) {
-                  pushToast("Coins exhausted. Disconnecting...");
-                  await hangUpRef.current();
-                } else {
-                  pushToast(result.error || "Billing failed");
-                }
+              } else if (result.exhausted) {
+                pushToast("Coins exhausted. Disconnecting...");
+                await hangUpRef.current();
               } else {
-                const ok = await spendAsync(
-                  chargeRate,
-                  `−${chargeRate} coins · 1 min`,
-                );
-                if (ok) {
-                  setDeductFlash(chargeRate);
-                  setTimeout(() => setDeductFlash(null), 900);
-                  pushFeed(`−${chargeRate} coins · 1 min`, "bill");
-                  await syncWallet?.();
-                } else {
-                  try {
-                    await spendCoinsApi({
-                      amount: chargeRate,
-                      reason: `call_minute_ai_${id}`,
-                    });
-                    setDeductFlash(chargeRate);
+                // Firebase failed — Express fallback (single path, no double charge)
+                if (bridgeCall?.id && !isAi) {
+                  const expr = await billCallMinute(bridgeCall.id);
+                  if (expr.ok) {
+                    const amt = expr.amount ?? chargeNow;
+                    setDeductFlash(amt);
                     setTimeout(() => setDeductFlash(null), 900);
-                    pushFeed(`−${chargeRate} coins · 1 min`, "bill");
+                    pushFeed(`−${amt} coins · 1 min`, "bill");
                     await syncWallet?.();
-                  } catch {
+                    const nextBal = expr.coinBalance ?? coinsNow - amt;
+                    if (nextBal < chargeNow) {
+                      pushToast("Coins exhausted. Disconnecting...");
+                      await hangUpRef.current();
+                    }
+                  } else if (expr.exhausted) {
+                    pushToast("Coins exhausted. Disconnecting...");
+                    await hangUpRef.current();
+                  } else {
+                    pushToast(expr.error || result.error || "Billing failed");
+                  }
+                } else {
+                  const ok = await spendAsync(
+                    chargeNow,
+                    `−${chargeNow} coins · 1 min`,
+                  );
+                  if (ok) {
+                    setDeductFlash(chargeNow);
+                    setTimeout(() => setDeductFlash(null), 900);
+                    pushFeed(`−${chargeNow} coins · 1 min`, "bill");
+                  } else {
                     pushToast("Coins exhausted. Disconnecting...");
                     await hangUpRef.current();
                   }
                 }
               }
-            } catch (err) {
-              pushToast(
-                err instanceof Error
-                  ? err.message
-                  : "Billing error — reconnecting…",
+            } else if (bridgeCall?.id && !isAi) {
+              const result = await billCallMinute(bridgeCall.id);
+              if (result.ok) {
+                const amt = result.amount ?? chargeNow;
+                setDeductFlash(amt);
+                setTimeout(() => setDeductFlash(null), 900);
+                pushFeed(`−${amt} coins · 1 min`, "bill");
+                await syncWallet?.();
+                const nextBal = result.coinBalance ?? coinsNow - amt;
+                if (nextBal < chargeNow) {
+                  pushToast("Coins exhausted. Disconnecting...");
+                  await hangUpRef.current();
+                } else if (maxCallMinutes(nextBal, chargeNow) <= 1) {
+                  lowBalanceWarnedRef.current = false;
+                }
+              } else if (result.exhausted) {
+                pushToast("Coins exhausted. Disconnecting...");
+                await hangUpRef.current();
+              } else {
+                pushToast(result.error || "Billing failed");
+              }
+            } else {
+              const ok = await spendAsync(
+                chargeNow,
+                `−${chargeNow} coins · 1 min`,
               );
-            } finally {
-              billingBusyRef.current = false;
+              if (ok) {
+                setDeductFlash(chargeNow);
+                setTimeout(() => setDeductFlash(null), 900);
+                pushFeed(`−${chargeNow} coins · 1 min`, "bill");
+                await syncWallet?.();
+              } else {
+                try {
+                  await spendCoinsApi({
+                    amount: chargeNow,
+                    reason: `call_minute_ai_${id}`,
+                  });
+                  setDeductFlash(chargeNow);
+                  setTimeout(() => setDeductFlash(null), 900);
+                  pushFeed(`−${chargeNow} coins · 1 min`, "bill");
+                  await syncWallet?.();
+                } catch {
+                  pushToast("Coins exhausted. Disconnecting...");
+                  await hangUpRef.current();
+                }
+              }
             }
-          })();
-        }
-        return next;
-      });
+          } catch (err) {
+            pushToast(
+              err instanceof Error
+                ? err.message
+                : "Billing error — reconnecting…",
+            );
+          } finally {
+            billingBusyRef.current = false;
+          }
+        })();
+      }
     }, 1000);
 
     return () => clearInterval(tick);
   }, [
     isConnected,
-    chargeRate,
     spendAsync,
     pushToast,
-    trialMode,
     endFreeTrial,
     bridgeCall?.id,
     bridgeCall?.hostId,
     isAi,
     syncWallet,
     id,
-    coins,
     sessionId,
     liveHost?.id,
     aiHost?.host_id,
