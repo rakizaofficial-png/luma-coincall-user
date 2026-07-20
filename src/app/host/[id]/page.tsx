@@ -12,6 +12,7 @@ import {
   Video,
 } from "lucide-react";
 import { fetchLiveHosts } from "@/lib/api";
+import { requireApiBase } from "@/config/apiConfig";
 import {
   hostFromId,
   type DiscoverHost,
@@ -20,6 +21,38 @@ import { openDmWithHost } from "@/lib/dmStore";
 import { useApp } from "@/lib/store";
 import { pickHostAvatarUrl } from "@/lib/hostAvatar";
 import { HostAvatarImg } from "@/components/host/HostAvatarImg";
+
+async function fetchHostProfile(id: string): Promise<{
+  name?: string;
+  avatarUrl?: string;
+  country?: string;
+  ratePerMinute?: number;
+  isOnline?: boolean;
+  isLive?: boolean;
+  isOnCall?: boolean;
+} | null> {
+  try {
+    const res = await fetch(
+      `${requireApiBase()}/hosts/${encodeURIComponent(id)}/profile`,
+      { cache: "no-store" },
+    );
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      host?: {
+        name?: string;
+        avatarUrl?: string;
+        country?: string;
+        ratePerMinute?: number;
+        isOnline?: boolean;
+        isLive?: boolean;
+        isOnCall?: boolean;
+      };
+    };
+    return data.host || null;
+  } catch {
+    return null;
+  }
+}
 
 export default function HostProfilePage({
   params,
@@ -33,36 +66,40 @@ export default function HostProfilePage({
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+
+    const hydrate = async () => {
       try {
-        const live = await fetchLiveHosts({ readyOnly: false });
+        const [live, profile] = await Promise.all([
+          fetchLiveHosts({ readyOnly: false }),
+          fetchHostProfile(id),
+        ]);
         if (cancelled) return;
         const next = hostFromId(id, live);
+        const name = profile?.name || next.name;
+        const avatarUrl = pickHostAvatarUrl(
+          {
+            avatarUrl: profile?.avatarUrl || next.avatarUrl,
+          },
+          { hostId: next.id, name },
+        );
         setHost({
           ...next,
-          avatarUrl: pickHostAvatarUrl(
-            { avatarUrl: next.avatarUrl },
-            { hostId: next.id, name: next.name },
-          ),
+          name,
+          avatarUrl,
+          country: profile?.country || next.country,
+          callRate: profile?.ratePerMinute || next.callRate,
+          online: profile?.isOnline ?? next.online,
+          live: profile?.isLive ?? next.live,
+          onCall: profile?.isOnCall ?? next.onCall,
         });
       } catch {
         if (!cancelled) setHost(hostFromId(id));
       }
-    })();
+    };
+
+    void hydrate();
     const t = setInterval(() => {
-      void fetchLiveHosts({ readyOnly: false })
-        .then((live) => {
-          if (cancelled) return;
-          const next = hostFromId(id, live);
-          setHost({
-            ...next,
-            avatarUrl: pickHostAvatarUrl(
-              { avatarUrl: next.avatarUrl },
-              { hostId: next.id, name: next.name },
-            ),
-          });
-        })
-        .catch(() => undefined);
+      void hydrate();
     }, 8000);
     return () => {
       cancelled = true;
