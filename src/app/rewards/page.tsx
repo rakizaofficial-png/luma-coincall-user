@@ -23,6 +23,7 @@ import { useApp } from "@/lib/store";
 export default function RewardsPage() {
   const {
     engagement,
+    clientReady,
     claimWeeklyMission,
     applyReferral,
     enablePushOptIn,
@@ -31,6 +32,10 @@ export default function RewardsPage() {
   const [spinOpen, setSpinOpen] = useState(false);
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [refCode, setRefCode] = useState("");
+
+  const level = clientReady ? engagement.level : 1;
+  const levelXp = clientReady ? engagement.levelXp : 0;
+  const streak = clientReady ? engagement.streak : 0;
 
   return (
     <main className="pb-28">
@@ -50,23 +55,23 @@ export default function RewardsPage() {
         <div className="glass-card rounded-2xl p-4">
           <div className="flex items-center justify-between">
             <p className="font-display text-lg font-extrabold">
-              Level {engagement.level}
+              Level {level}
             </p>
             <p className="text-xs text-cyan">
-              {engagement.levelXp}/{XP_PER_LEVEL} XP
+              {levelXp}/{XP_PER_LEVEL} XP
             </p>
           </div>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-ink-3">
             <div
               className="h-full rounded-full bg-gradient-to-r from-coral to-gold"
               style={{
-                width: `${(engagement.levelXp / XP_PER_LEVEL) * 100}%`,
+                width: `${(levelXp / XP_PER_LEVEL) * 100}%`,
               }}
             />
           </div>
           <p className="mt-2 flex items-center gap-1 text-xs text-muted">
             <Flame className="h-3.5 w-3.5 text-coral" />
-            {engagement.streak}-day streak
+            {streak}-day streak
           </p>
         </div>
 

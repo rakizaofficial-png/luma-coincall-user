@@ -66,28 +66,52 @@ export default function CallSessionClient({
   } = useApp();
 
   const [trialMode, setTrialMode] = useState(false);
+  const [secs, setSecs] = useState(0);
+  const [muted, setMuted] = useState(false);
+  const [giftOpen, setGiftOpen] = useState(false);
+  const [beautyOn, setBeautyOn] = useState(true);
+  const [trialPaywall, setTrialPaywall] = useState(false);
+  const [lowBalanceOpen, setLowBalanceOpen] = useState(false);
+  const [deductFlash, setDeductFlash] = useState<number | null>(null);
+  const [feed, setFeed] = useState<FeedLine[]>([]);
+  const hangUpRef = useRef<() => Promise<void>>(async () => undefined);
+  const trialEndedRef = useRef(false);
+  const billingPausedRef = useRef(false);
+  const billingBusyRef = useRef(false);
+  const lowBalanceWarnedRef = useRef(false);
+  const feedEndRef = useRef<HTMLDivElement>(null);
+  const pushToastRef = useRef(pushToast);
+  pushToastRef.current = pushToast;
+
+  function pushFeed(text: string, tone: FeedLine["tone"] = "system") {
+    setFeed((prev) =>
+      [...prev, { id: `${Date.now()}_${Math.random()}`, text, tone }].slice(-24),
+    );
+  }
+  const pushFeedRef = useRef(pushFeed);
+  pushFeedRef.current = pushFeed;
 
   useEffect(() => {
     if (trialParam && freeTrialAvailable && useFreeTrial()) {
       setTrialMode(true);
-      pushToast("Free 30s trial started");
+      pushToastRef.current("Free 30s trial started");
     }
-  }, [trialParam, freeTrialAvailable, useFreeTrial, pushToast]);
+  }, [trialParam, freeTrialAvailable, useFreeTrial]);
 
   const engine = useCallSessionEngine({
     hostId: id,
     enabled: true,
     preferLiveBridge,
     onConnected: ({ transport, name }) => {
-      pushFeed(`Connected with ${name}`, "system");
-      pushToast(
+      pushFeedRef.current(`Connected with ${name}`, "system");
+      pushToastRef.current(
         transport === "ai_prerecorded"
           ? `${name} · preview host (AI clip) while live hosts are busy`
           : `You’re live with ${name}`,
       );
     },
     onFailed: (message) => {
-      pushToast(message);
+      pushToastRef.current(message);
       if (/insufficient balance/i.test(message)) {
         setLowBalanceOpen(true);
       }
@@ -110,21 +134,6 @@ export default function CallSessionClient({
     sessionId,
   } = engine;
 
-  const [secs, setSecs] = useState(0);
-  const [muted, setMuted] = useState(false);
-  const [giftOpen, setGiftOpen] = useState(false);
-  const [beautyOn, setBeautyOn] = useState(true);
-  const [trialPaywall, setTrialPaywall] = useState(false);
-  const [lowBalanceOpen, setLowBalanceOpen] = useState(false);
-  const [deductFlash, setDeductFlash] = useState<number | null>(null);
-  const [feed, setFeed] = useState<FeedLine[]>([]);
-  const hangUpRef = useRef<() => Promise<void>>(async () => undefined);
-  const trialEndedRef = useRef(false);
-  const billingPausedRef = useRef(false);
-  const billingBusyRef = useRef(false);
-  const lowBalanceWarnedRef = useRef(false);
-  const feedEndRef = useRef<HTMLDivElement>(null);
-
   const isRinging = state === "RINGING" || state === "ROUTING";
   const isConnected = state === "CONNECTED";
   const isFailed = state === "FAILED";
@@ -139,12 +148,6 @@ export default function CallSessionClient({
     !isAi && bridgeCall?.ratePerMinute
       ? Math.max(1, Math.floor(bridgeCall.ratePerMinute))
       : rate;
-
-  function pushFeed(text: string, tone: FeedLine["tone"] = "system") {
-    setFeed((prev) =>
-      [...prev, { id: `${Date.now()}_${Math.random()}`, text, tone }].slice(-24),
-    );
-  }
 
   const hangUp = async () => {
     // Status → ended first so BOTH sides leave via RTDB listener

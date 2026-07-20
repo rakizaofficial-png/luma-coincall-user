@@ -44,6 +44,7 @@ export default function ProfilePage() {
     displayName,
     avatarUrl,
     ready,
+    clientReady,
     pushToast,
     syncWallet,
     updateDisplayName,
@@ -63,9 +64,19 @@ export default function ProfilePage() {
   const [nameDraft, setNameDraft] = useState("");
   const [historyTab, setHistoryTab] = useState<"calls" | "coins">("calls");
 
+  // SSR-safe: keep defaults until client has hydrated local engagement
+  const level = clientReady ? engagement.level : 1;
+  const levelXp = clientReady ? engagement.levelXp : 0;
+  const totalXp = clientReady ? xp : 0;
   const checkReward = nextCheckInReward(engagement);
-  const spinsLeft = spinsRemaining(engagement);
-  const xpPct = Math.min(100, Math.round((engagement.levelXp / 200) * 100));
+  const spinsLeft = clientReady ? spinsRemaining(engagement) : 0;
+  const xpPct = Math.min(100, Math.round((levelXp / 200) * 100));
+  const streakLabel = clientReady
+    ? engagement.checkInClaimedToday
+      ? `Streak ${engagement.streak}`
+      : `+${checkReward} coins`
+    : "…";
+  const balanceLabel = clientReady ? coins : 0;
 
   useEffect(() => {
     void fetchCoinCatalog().then((list) => {
@@ -145,7 +156,7 @@ export default function ProfilePage() {
 
       <section className="px-4 pb-5">
         <motion.div
-          initial={{ opacity: 0, y: 10 }}
+          initial={false}
           animate={{ opacity: 1, y: 0 }}
           className="relative overflow-hidden rounded-[1.75rem] border border-line bg-gradient-to-br from-ink-3 via-ink-2 to-ink p-5"
         >
@@ -224,7 +235,7 @@ export default function ProfilePage() {
               Balance{!ready ? " · syncing" : ""}
             </p>
             <p className="mt-0.5 font-display text-4xl font-extrabold tabular-nums tracking-tight">
-              {coins.toLocaleString()}
+              {balanceLabel.toLocaleString()}
               <span className="ml-2 text-base font-bold text-gold">coins</span>
             </p>
             <p className="mt-1 text-[10px] text-muted">
@@ -235,10 +246,10 @@ export default function ProfilePage() {
           <div className="relative mt-4">
             <div className="mb-1.5 flex items-center justify-between text-[11px]">
               <span className="font-bold text-sand">
-                Level {engagement.level}
+                Level {level}
               </span>
               <span className="text-muted">
-                {engagement.levelXp}/200 XP · {xp} total
+                {levelXp}/200 XP · {totalXp} total
               </span>
             </div>
             <div className="h-1.5 overflow-hidden rounded-full bg-ink">
@@ -264,9 +275,7 @@ export default function ProfilePage() {
             <Flame className="h-5 w-5 text-coral" />
             <p className="mt-2 font-display text-sm font-bold">Daily</p>
             <p className="text-[10px] text-muted">
-              {engagement.checkInClaimedToday
-                ? `Streak ${engagement.streak}`
-                : `+${checkReward} coins`}
+              {streakLabel}
             </p>
           </button>
           <button

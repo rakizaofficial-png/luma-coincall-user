@@ -58,6 +58,10 @@ export function useCallSessionEngine(opts: {
   onFailed?: (message: string) => void;
 }): CallSessionEngine {
   const { hostId, enabled, preferLiveBridge, onConnected, onFailed } = opts;
+  const onConnectedRef = useRef(onConnected);
+  const onFailedRef = useRef(onFailed);
+  onConnectedRef.current = onConnected;
+  onFailedRef.current = onFailed;
 
   const [state, setState] = useState<CallEngineState>("IDLE");
   const [transport, setTransport] = useState<CallTransport | null>(null);
@@ -315,7 +319,7 @@ export function useCallSessionEngine(opts: {
           });
           if (cancelledRef.current) return;
           setStatusText(`Connected with ${host.name}`);
-          onConnected?.({ transport: "agora_live", name: host.name });
+          onConnectedRef.current?.({ transport: "agora_live", name: host.name });
           return;
         }
 
@@ -382,14 +386,14 @@ export function useCallSessionEngine(opts: {
 
         setState("CONNECTED");
         setStatusText(`Connected with ${ai.name}`);
-        onConnected?.({ transport: "ai_prerecorded", name: ai.name });
+        onConnectedRef.current?.({ transport: "ai_prerecorded", name: ai.name });
       } catch (e: unknown) {
         if (cancelledRef.current) return;
         stopRingingTone();
         const message = e instanceof Error ? e.message : "Could not connect";
         setState("FAILED");
         setStatusText(message);
-        onFailed?.(message);
+        onFailedRef.current?.(message);
       }
     })();
 

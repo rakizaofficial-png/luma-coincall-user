@@ -57,6 +57,8 @@ type Toast = { id: string; text: string };
 
 type AppStore = {
   ready: boolean;
+  /** False until after first client mount — use for SSR-safe UI */
+  clientReady: boolean;
   userId: string;
   displayName: string;
   avatarUrl: string;
@@ -123,7 +125,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [topUpGrace, setTopUpGrace] = useState(15);
   const [entranceBlast, setEntranceBlast] = useState(false);
   const [entranceReady, setEntranceReady] = useState(false);
-  const [engagement, setEngagement] = useState<EngagementState>(emptyEngagement);
+  // Always start with deterministic SSR defaults — never read localStorage here
+  const [engagement, setEngagement] = useState<EngagementState>(() =>
+    emptyEngagement(),
+  );
+  const [clientReady, setClientReady] = useState(false);
   const [coinBurst, setCoinBurst] = useState(0);
   const graceRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -132,7 +138,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const pushToast = useCallback((text: string) => {
     const id = `${Date.now()}-${++toastSeq}`;
-    setToasts((t) => [...t, { id, text }]);
+    // Defer so we never setState on AppProvider during another component's render
+    queueMicrotask(() => {
+      setToasts((t) => [...t, { id, text }]);
+    });
     setTimeout(() => {
       setToasts((t) => t.filter((x) => x.id !== id));
     }, 2400);
@@ -150,6 +159,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // Load localStorage engagement only after mount (SSR-safe)
   useEffect(() => {
     setEngagement(getEngagement());
+    setClientReady(true);
   }, []);
 
   const syncWallet = useCallback(async () => {
@@ -477,6 +487,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const value = useMemo(
     () => ({
       ready,
+      clientReady,
       userId,
       displayName,
       avatarUrl,
@@ -525,6 +536,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     [
       ready,
+      clientReady,
       userId,
       displayName,
       avatarUrl,

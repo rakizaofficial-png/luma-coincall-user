@@ -7,7 +7,7 @@ export function CoinDeductFlash({ amount }: { amount: number | null }) {
     <AnimatePresence>
       {amount != null && amount > 0 ? (
         <motion.div
-          key={amount + Date.now()}
+          key={`deduct-${amount}`}
           initial={{ opacity: 0, y: 8, scale: 0.9 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: -12 }}
