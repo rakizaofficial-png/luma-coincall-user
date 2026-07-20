@@ -9,7 +9,6 @@ import {
   useRef,
   useState,
 } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -17,6 +16,7 @@ import { Gem, Plus, Send, X } from "lucide-react";
 import { gifts } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import { GiftSheet } from "@/components/GiftSheet";
+import { HostAvatarImg } from "@/components/host/HostAvatarImg";
 import {
   startUserAgoraLiveViewer,
   stopUserAgoraLiveViewer,
@@ -78,13 +78,6 @@ export default function HostOnlyLiveRoomPage({
 
   const userId = useMemo(() => getDeviceUserId(), []);
   const userName = "Luma Fan";
-
-  const remoteImg = Boolean(
-    room?.hostAvatar &&
-      (room.hostAvatar.includes("pravatar") ||
-        room.hostAvatar.includes("dicebear") ||
-        !room.hostAvatar.includes("unsplash")),
-  );
 
   const chatEnabled = Boolean(room?.id && (status === "live" || status === "loading"));
 
@@ -367,13 +360,13 @@ export default function HostOnlyLiveRoomPage({
       {/* Cover while connecting / waiting for host video */}
       {!streamReady && (
         <div className="pointer-events-none absolute inset-0 z-[1]">
-          <Image
+          <HostAvatarImg
             src={avatar}
+            hostId={room?.hostId || id}
+            name={room?.hostName}
             alt=""
             fill
-            priority
-            className="object-cover opacity-70"
-            unoptimized={remoteImg || true}
+            className="opacity-70"
           />
           <div className="absolute inset-0 flex items-center justify-center bg-black/50">
             <p className="rounded-full bg-black/55 px-4 py-2 text-sm font-semibold text-white backdrop-blur">
@@ -393,13 +386,12 @@ export default function HostOnlyLiveRoomPage({
         {/* Header — floating glass */}
         <div className="pointer-events-auto flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 rounded-full border border-white/20 bg-white/12 py-1 pl-1 pr-2 shadow-lg backdrop-blur-xl">
-            <Image
+            <HostAvatarImg
               src={avatar}
+              hostId={room?.hostId || id}
+              name={room?.hostName}
               alt=""
-              width={36}
-              height={36}
               className="h-9 w-9 rounded-full object-cover ring-1 ring-white/30"
-              unoptimized
             />
             <div className="min-w-0">
               <p className="truncate text-sm font-bold leading-tight text-white drop-shadow">

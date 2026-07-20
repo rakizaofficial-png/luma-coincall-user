@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
@@ -18,6 +17,7 @@ import { GiftSheet } from "@/components/GiftSheet";
 import { LoungeShell } from "@/components/LoungeShell";
 import { VipRibbon } from "@/components/VipRibbon";
 import { WalletDiamond } from "@/components/WalletDiamond";
+import { HostAvatarImg } from "@/components/host/HostAvatarImg";
 import { giftTickerLines } from "@/lib/data";
 import { fetchLiveHosts, type LiveHost } from "@/lib/api";
 import { pickHostAvatarUrl } from "@/lib/hostAvatar";
@@ -229,12 +229,13 @@ export function SwipeFeed() {
             className="absolute inset-0 cursor-pointer"
             onClick={routeToHost}
           >
-            <Image
+            <HostAvatarImg
               src={image}
+              hostId={hostId}
+              name={name}
               alt={name}
               fill
-              priority
-              className={`object-cover transition duration-700 ${
+              className={`transition duration-700 ${
                 blurOn ? "scale-110 blur-2xl brightness-75" : "brightness-90"
               }`}
             />
@@ -315,11 +316,11 @@ export function SwipeFeed() {
 
             <div className="pointer-events-auto flex flex-col items-center gap-3 pb-1">
               <div className="relative">
-                <Image
+                <HostAvatarImg
                   src={image}
+                  hostId={hostId}
+                  name={name}
                   alt=""
-                  width={52}
-                  height={52}
                   className="h-[52px] w-[52px] rounded-full object-cover ring-2 ring-cyan shadow-[0_0_16px_rgba(0,240,255,0.45)]"
                 />
                 <span className="absolute -bottom-0.5 -right-0.5 h-3.5 w-3.5 animate-pulse rounded-full border-2 border-ink bg-cyan" />

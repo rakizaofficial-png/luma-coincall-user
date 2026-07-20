@@ -1,13 +1,13 @@
 "use client";
 
 import { use, useEffect, useMemo, useRef, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowLeft, Gift, Send, Video } from "lucide-react";
 import { resolveLiveCreator, threads } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import { GiftSheet } from "@/components/GiftSheet";
+import { HostAvatarImg } from "@/components/host/HostAvatarImg";
 import { VipChatBubble } from "@/components/VipChatBubble";
 import { WalletDiamond } from "@/components/WalletDiamond";
 import {
@@ -154,14 +154,14 @@ export default function ChatThreadPage({
           href={`/host/${encodeURIComponent(hostMeta.id || "x")}`}
           className="flex min-w-0 flex-1 items-center gap-3"
         >
-          <Image
+          <HostAvatarImg
             src={pickHostAvatarUrl(
               { avatarUrl: hostMeta.image },
               { hostId: hostMeta.id || id, name: hostMeta.name },
             )}
+            hostId={hostMeta.id || id}
+            name={hostMeta.name}
             alt={hostMeta.name}
-            width={40}
-            height={40}
             className="h-10 w-10 rounded-full object-cover ring-2 ring-[#ff9f1a]/40"
           />
           <div className="min-w-0">

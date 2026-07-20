@@ -1,7 +1,6 @@
 "use client";
 
 import { use, useEffect, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -15,11 +14,12 @@ import {
 import { fetchLiveHosts } from "@/lib/api";
 import {
   hostFromId,
-  mergeDiscoverHosts,
   type DiscoverHost,
 } from "@/lib/discoverHosts";
 import { openDmWithHost } from "@/lib/dmStore";
 import { useApp } from "@/lib/store";
+import { pickHostAvatarUrl } from "@/lib/hostAvatar";
+import { HostAvatarImg } from "@/components/host/HostAvatarImg";
 
 export default function HostProfilePage({
   params,
@@ -35,15 +35,38 @@ export default function HostProfilePage({
     let cancelled = false;
     (async () => {
       try {
-        const live = await fetchLiveHosts();
+        const live = await fetchLiveHosts({ readyOnly: false });
         if (cancelled) return;
-        setHost(hostFromId(id, live));
+        const next = hostFromId(id, live);
+        setHost({
+          ...next,
+          avatarUrl: pickHostAvatarUrl(
+            { avatarUrl: next.avatarUrl },
+            { hostId: next.id, name: next.name },
+          ),
+        });
       } catch {
         if (!cancelled) setHost(hostFromId(id));
       }
     })();
+    const t = setInterval(() => {
+      void fetchLiveHosts({ readyOnly: false })
+        .then((live) => {
+          if (cancelled) return;
+          const next = hostFromId(id, live);
+          setHost({
+            ...next,
+            avatarUrl: pickHostAvatarUrl(
+              { avatarUrl: next.avatarUrl },
+              { hostId: next.id, name: next.name },
+            ),
+          });
+        })
+        .catch(() => undefined);
+    }, 8000);
     return () => {
       cancelled = true;
+      clearInterval(t);
     };
   }, [id]);
 
@@ -67,14 +90,14 @@ export default function HostProfilePage({
 
   return (
     <main className="min-h-dvh bg-[#0b0b0f] pb-28 text-white">
-      <div className="relative h-[58vh] min-h-[340px] w-full overflow-hidden">
-        <Image
+      <div className="relative h-[58vh] min-h-[340px] w-full overflow-hidden bg-[#16161c]">
+        <HostAvatarImg
           src={host.avatarUrl}
+          hostId={host.id}
+          name={host.name}
           alt={host.name}
           fill
-          priority
           className="object-cover"
-          sizes="100vw"
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-[#0b0b0f]" />
 
@@ -192,7 +215,7 @@ export default function HostProfilePage({
             href={
               host.live
                 ? `/live/${encodeURIComponent(host.id)}`
-                : `/call/${encodeURIComponent(host.id)}`
+                : `/call/${encodeURIComponent(host.id)}${host.source === "live" ? "?live=1" : ""}`
             }
             className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#ff9f1a] py-3.5 text-sm font-bold text-black"
           >

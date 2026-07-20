@@ -1,7 +1,6 @@
 "use client";
 
 import { use, useEffect, useRef, useState } from "react";
-import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -13,6 +12,7 @@ import {
   Sparkles,
   SwitchCamera,
 } from "lucide-react";
+import { HostAvatarImg } from "@/components/host/HostAvatarImg";
 import { CoinDeductFlash } from "@/components/call/CoinDeductFlash";
 import { FakeLiveVideoPlayer } from "@/components/call/FakeLiveVideoPlayer";
 import { TrialPaywall } from "@/components/call/TrialPaywall";
@@ -405,23 +405,24 @@ export default function CallSessionClient({
       )}
 
       {!isConnected && (
-        <Image
+        <HostAvatarImg
           src={displayAvatar}
+          hostId={id}
+          name={displayName}
           alt={displayName}
           fill
-          priority
-          className="object-cover brightness-75"
+          className="brightness-75"
         />
       )}
 
       {isRinging && (
         <div className="absolute inset-0 z-[1] flex flex-col items-center justify-center bg-gradient-to-b from-black via-black/80 to-[#1a0a14]/90">
           <span className="absolute h-36 w-36 animate-ping rounded-full bg-rose-500/20" />
-          <Image
+          <HostAvatarImg
             src={displayAvatar}
+            hostId={id}
+            name={displayName}
             alt=""
-            width={120}
-            height={120}
             className="relative h-28 w-28 rounded-full object-cover ring-2 ring-white/40"
           />
           <p className="mt-6 font-display text-2xl font-extrabold text-white drop-shadow">
@@ -451,11 +452,11 @@ export default function CallSessionClient({
       <header className="pointer-events-none absolute inset-x-0 top-0 z-20 px-3 pt-[max(0.6rem,env(safe-area-inset-top))]">
         <div className="flex items-start justify-between gap-2">
           <div className="pointer-events-auto flex max-w-[70%] items-center gap-2 rounded-full border border-white/15 bg-white/10 py-1 pl-1 pr-3 shadow-lg backdrop-blur-xl">
-            <Image
+            <HostAvatarImg
               src={displayAvatar}
+              hostId={id}
+              name={displayName}
               alt=""
-              width={34}
-              height={34}
               className="h-8.5 w-8.5 rounded-full object-cover ring-1 ring-white/30"
             />
             <div className="min-w-0">

@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import { TopBar } from "@/components/TopBar";
+import { HostAvatarImg } from "@/components/host/HostAvatarImg";
 import { listDmThreads, type DmThread } from "@/lib/dmStore";
 import { threads, getCreator } from "@/lib/data";
 
@@ -68,11 +68,11 @@ export default function MessagesPage() {
                 className="flex items-center gap-3 rounded-2xl px-2 py-3 transition active:bg-ink-2"
               >
                 <div className="relative">
-                  <Image
+                  <HostAvatarImg
                     src={t.hostAvatar}
+                    hostId={t.hostId}
+                    name={t.hostName}
                     alt={t.hostName}
-                    width={56}
-                    height={56}
                     className="h-14 w-14 rounded-full object-cover"
                   />
                 </div>
@@ -114,11 +114,11 @@ export default function MessagesPage() {
                 href={`/messages/${t.id}`}
                 className="flex items-center gap-3 rounded-2xl px-2 py-3 transition active:bg-ink-2"
               >
-                <Image
+                <HostAvatarImg
                   src={t.creator.image}
+                  hostId={t.creator.id}
+                  name={t.creator.name}
                   alt={t.creator.name}
-                  width={56}
-                  height={56}
                   className="h-14 w-14 rounded-full object-cover"
                 />
                 <div className="min-w-0 flex-1">

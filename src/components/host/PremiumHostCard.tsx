@@ -2,12 +2,12 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type MouseEvent, useEffect, useState } from "react";
+import { type MouseEvent } from "react";
 import { motion } from "framer-motion";
 import { Send, Video } from "lucide-react";
 import type { DiscoverHost } from "@/lib/discoverHosts";
 import { openDmWithHost } from "@/lib/dmStore";
-import { defaultHostAvatar } from "@/lib/hostAvatar";
+import { HostAvatarImg } from "@/components/host/HostAvatarImg";
 
 type Mode = "call" | "watch";
 
@@ -16,36 +16,6 @@ function statusLabel(host: DiscoverHost, mode: Mode) {
   if (host.onCall) return { text: "Busy", tone: "busy" as const };
   if (host.online) return { text: "Online", tone: "online" as const };
   return { text: "Offline", tone: "off" as const };
-}
-
-/** Plain <img> — avoids Next/Image domain whitelist failures for host DPs */
-function HostPhoto({
-  host,
-  className,
-}: {
-  host: DiscoverHost;
-  className?: string;
-}) {
-  const fallback = defaultHostAvatar(host.id, host.name);
-  const [src, setSrc] = useState(host.avatarUrl || fallback);
-
-  useEffect(() => {
-    setSrc(host.avatarUrl || fallback);
-  }, [host.avatarUrl, fallback]);
-
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt={host.name}
-      className={className || "h-full w-full object-cover"}
-      loading="lazy"
-      referrerPolicy="no-referrer"
-      onError={() => {
-        if (src !== fallback) setSrc(fallback);
-      }}
-    />
-  );
 }
 
 /** Modern portrait card — Online/Busy, name, gender, country, rate, chat + video */
@@ -93,9 +63,12 @@ export function HostGridCard({
       className="group relative overflow-hidden rounded-[1.35rem] bg-[#1a1a1f] shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
     >
       <Link href={profileHref} className="relative block aspect-[3/4] w-full">
-        <HostPhoto
-          host={host}
-          className="absolute inset-0 h-full w-full object-cover transition duration-500 group-hover:scale-105"
+        <HostAvatarImg
+          src={host.avatarUrl}
+          hostId={host.id}
+          name={host.name}
+          fill
+          className="transition duration-500 group-hover:scale-105"
         />
         <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/20 to-black/25" />
 
@@ -198,7 +171,12 @@ export function PremiumHostCard({
         className="relative flex w-[148px] shrink-0 flex-col overflow-hidden rounded-2xl bg-ink-2"
       >
         <div className="relative h-[168px] w-full">
-          <HostPhoto host={host} className="absolute inset-0 h-full w-full object-cover" />
+          <HostAvatarImg
+            src={host.avatarUrl}
+            hostId={host.id}
+            name={host.name}
+            fill
+          />
           <div className="absolute inset-0 bg-gradient-to-t from-ink via-transparent to-transparent" />
           {(host.online || host.live) && (
             <span className="absolute left-2 top-2 flex items-center gap-1 rounded-full bg-black/50 px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-white backdrop-blur">
