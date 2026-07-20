@@ -45,10 +45,12 @@ import {
   fetchOrCreateWallet,
   setPremiumApi,
   spendCoinsApi,
+  updateProfileAvatar,
   updateProfileName,
 } from "@/lib/walletApi";
 import {
   ensureLocalProfile,
+  updateLocalAvatar,
   updateLocalDisplayName,
 } from "@/lib/userProfile";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
@@ -90,6 +92,7 @@ type AppStore = {
   /** Update on-screen balance without Express (Firebase per-minute billing). */
   applyLocalCoins: (balance: number) => void;
   updateDisplayName: (name: string) => Promise<void>;
+  updateAvatar: (avatarUrl: string) => Promise<void>;
   addXp: (amount: number) => void;
   toggleFollow: (id: string) => void;
   setPremium: (v: boolean) => void;
@@ -224,14 +227,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const wallet = await updateProfileName(name);
         setDisplayName(wallet.displayName);
         if (wallet.avatarUrl) setAvatarUrl(wallet.avatarUrl);
+        getRealtimeClient(wallet.userId || userId, {
+          displayName: wallet.displayName,
+          avatarUrl: wallet.avatarUrl || avatarUrl,
+        });
         pushToast("Profile updated");
       } catch {
         const local = updateLocalDisplayName(name);
         setDisplayName(local.displayName);
+        getRealtimeClient(local.userId, {
+          displayName: local.displayName,
+          avatarUrl: local.avatarUrl,
+        });
         pushToast("Saved on this device");
       }
     },
-    [pushToast],
+    [avatarUrl, pushToast, userId],
+  );
+
+  const updateAvatar = useCallback(
+    async (nextAvatar: string) => {
+      try {
+        const wallet = await updateProfileAvatar(nextAvatar);
+        setAvatarUrl(wallet.avatarUrl || nextAvatar);
+        if (wallet.displayName) setDisplayName(wallet.displayName);
+        getRealtimeClient(wallet.userId || userId, {
+          displayName: wallet.displayName || displayName,
+          avatarUrl: wallet.avatarUrl || nextAvatar,
+        });
+        pushToast("Photo updated");
+      } catch {
+        const local = updateLocalAvatar(nextAvatar);
+        setAvatarUrl(local.avatarUrl);
+        getRealtimeClient(local.userId, {
+          displayName: local.displayName,
+          avatarUrl: local.avatarUrl,
+        });
+        pushToast("Saved on this device");
+      }
+    },
+    [displayName, pushToast, userId],
   );
 
   useEffect(() => {
@@ -256,7 +291,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
           pushToast("Profile created · +100 welcome coins");
         }
 
-        const rt = getRealtimeClient(local.userId);
+        const name =
+          wallet.displayName?.trim() && wallet.displayName !== "Luma Fan"
+            ? wallet.displayName
+            : local.displayName;
+        const avatar = wallet.avatarUrl || local.avatarUrl;
+        const rt = getRealtimeClient(local.userId, {
+          displayName: name,
+          avatarUrl: avatar,
+        });
         rt.connect();
         unsub = rt.subscribe((ev) => {
           if (
@@ -518,6 +561,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       syncWallet,
       applyLocalCoins,
       updateDisplayName,
+      updateAvatar,
       addXp,
       toggleFollow,
       setPremium,
@@ -567,6 +611,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       syncWallet,
       applyLocalCoins,
       updateDisplayName,
+      updateAvatar,
       addXp,
       toggleFollow,
       activatePremium,

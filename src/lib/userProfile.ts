@@ -102,6 +102,15 @@ export function uniqueAvatarUrl(userId: string): string {
   return `https://api.dicebear.com/9.x/${style}/svg?seed=${encodeURIComponent(userId)}`;
 }
 
+/** Avatar picker options for profile edit (same seed = consistent face per style). */
+export function avatarStyleOptions(seed: string): { style: string; url: string }[] {
+  const s = seed.trim() || "luma";
+  return AVATAR_STYLES.map((style) => ({
+    style,
+    url: `https://api.dicebear.com/9.x/${style}/svg?seed=${encodeURIComponent(s)}`,
+  }));
+}
+
 export function isGenericDisplayName(name: string | undefined | null): boolean {
   const n = (name || "").trim();
   if (!n) return true;

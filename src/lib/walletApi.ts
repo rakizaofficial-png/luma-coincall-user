@@ -137,6 +137,23 @@ export async function updateProfileName(
   return data.wallet;
 }
 
+/** Update avatar on device + server */
+export async function updateProfileAvatar(
+  avatarUrl: string,
+): Promise<WalletSnapshot> {
+  const local = updateLocalAvatar(avatarUrl);
+  const data = await api<{ wallet: WalletSnapshot }>("/wallet/me", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: local.userId,
+      displayName: local.displayName,
+      avatarUrl: local.avatarUrl,
+      updateProfile: true,
+    }),
+  });
+  return data.wallet;
+}
+
 export async function refreshWallet(): Promise<WalletSnapshot> {
   const userId = deviceUserId();
   const data = await api<{ wallet: WalletSnapshot }>(

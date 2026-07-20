@@ -5,7 +5,6 @@ import {
   use,
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
@@ -59,7 +58,16 @@ export default function HostOnlyLiveRoomPage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const { following, toggleFollow, coins, pushToast, syncWallet } = useApp();
+  const {
+    following,
+    toggleFollow,
+    coins,
+    pushToast,
+    syncWallet,
+    displayName,
+    avatarUrl,
+    userId: storeUserId,
+  } = useApp();
   const videoRef = useRef<HTMLDivElement>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -76,8 +84,8 @@ export default function HostOnlyLiveRoomPage({
   const [streamReady, setStreamReady] = useState(false);
   const [videoError, setVideoError] = useState<string | null>(null);
 
-  const userId = useMemo(() => getDeviceUserId(), []);
-  const userName = "Luma Fan";
+  const userId = storeUserId || getDeviceUserId();
+  const userName = displayName || "Fan";
 
   const chatEnabled = Boolean(room?.id && (status === "live" || status === "loading"));
 
@@ -171,7 +179,7 @@ export default function HostOnlyLiveRoomPage({
         });
       }
     };
-  }, [id, loadRoom, userId]);
+  }, [id, loadRoom, userId, userName]);
 
   // Chat + diamonds + end detection — keep listening while room is known
   useEffect(() => {
@@ -190,7 +198,10 @@ export default function HostOnlyLiveRoomPage({
       );
     });
 
-    const rt = getRealtimeClient(userId);
+    const rt = getRealtimeClient(userId, {
+      displayName: userName,
+      avatarUrl,
+    });
     rt.connect();
     const offRt = rt.subscribe((ev) => {
       if (ev.type === "live:ended" && ev.payload.id === room.id) {
@@ -273,7 +284,7 @@ export default function HostOnlyLiveRoomPage({
       offRt();
       clearInterval(poll);
     };
-  }, [room?.id, room?.hostId, status, userId]);
+  }, [room?.id, room?.hostId, status, userId, userName, avatarUrl]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });

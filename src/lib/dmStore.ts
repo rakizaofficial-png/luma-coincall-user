@@ -7,6 +7,7 @@
 
 import { requireApiBase } from "@/config/apiConfig";
 import { getDeviceUserId } from "@/lib/walletApi";
+import { getLocalProfile } from "@/lib/userProfile";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
 
 export type DmMessage = {
@@ -182,6 +183,7 @@ export async function sendDmMessage(
     unread: 0,
   });
 
+  const profile = getLocalProfile();
   const res = await fetch(`${requireApiBase()}/dm/send`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -189,7 +191,8 @@ export async function sendDmMessage(
       fromId: userId,
       toId: hostId,
       text: trimmed,
-      fromName: "Luma Fan",
+      fromName: profile.displayName || "Fan",
+      fromAvatar: profile.avatarUrl || undefined,
       fromRole: "user",
       peerName: meta?.hostName || "Host",
       peerAvatar: meta?.hostAvatar,

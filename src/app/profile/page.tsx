@@ -32,7 +32,7 @@ import {
   getDeviceUserId,
   type WalletLedgerEntry,
 } from "@/lib/walletApi";
-import { shortUserId } from "@/lib/userProfile";
+import { shortUserId, avatarStyleOptions } from "@/lib/userProfile";
 import { nextCheckInReward, spinsRemaining, useApp } from "@/lib/store";
 import { vipLabel } from "@/lib/ledger";
 
@@ -48,6 +48,7 @@ export default function ProfilePage() {
     pushToast,
     syncWallet,
     updateDisplayName,
+    updateAvatar,
     isPremium,
     engagement,
     vipTier,
@@ -61,8 +62,10 @@ export default function ProfilePage() {
   const [spinOpen, setSpinOpen] = useState(false);
   const [checkInOpen, setCheckInOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
+  const [editingAvatar, setEditingAvatar] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [historyTab, setHistoryTab] = useState<"calls" | "coins">("calls");
+  const [savingAvatar, setSavingAvatar] = useState(false);
 
   // SSR-safe: keep defaults until client has hydrated local engagement
   const level = clientReady ? engagement.level : 1;
@@ -133,6 +136,20 @@ export default function ProfilePage() {
     setEditingName(false);
   };
 
+  const pickAvatar = async (url: string) => {
+    if (savingAvatar || url === avatarUrl) {
+      setEditingAvatar(false);
+      return;
+    }
+    setSavingAvatar(true);
+    try {
+      await updateAvatar(url);
+      setEditingAvatar(false);
+    } finally {
+      setSavingAvatar(false);
+    }
+  };
+
   const copyId = async () => {
     try {
       await navigator.clipboard.writeText(userId);
@@ -141,6 +158,8 @@ export default function ProfilePage() {
       pushToast(userId);
     }
   };
+
+  const avatarChoices = avatarStyleOptions(userId || displayName || "luma");
 
   return (
     <main className="pb-28">
@@ -164,18 +183,28 @@ export default function ProfilePage() {
           <div className="pointer-events-none absolute -bottom-10 left-0 h-28 w-28 rounded-full bg-cyan/10 blur-3xl" />
 
           <div className="relative flex items-center gap-3">
-            {avatarUrl ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={avatarUrl}
-                alt=""
-                className="h-16 w-16 rounded-2xl bg-ink-3 object-cover ring-1 ring-white/10"
-              />
-            ) : (
-              <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-coral/30 to-gold/20 ring-1 ring-white/10">
-                <UserRound className="h-8 w-8 text-sand" />
+            <button
+              type="button"
+              onClick={() => setEditingAvatar((v) => !v)}
+              className="relative shrink-0"
+              aria-label="Change photo"
+            >
+              {avatarUrl ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={avatarUrl}
+                  alt=""
+                  className="h-16 w-16 rounded-2xl bg-ink-3 object-cover ring-1 ring-white/10"
+                />
+              ) : (
+                <span className="flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-coral/30 to-gold/20 ring-1 ring-white/10">
+                  <UserRound className="h-8 w-8 text-sand" />
+                </span>
+              )}
+              <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-coral text-white shadow-lg">
+                <Pencil className="h-3 w-3" />
               </span>
-            )}
+            </button>
             <div className="min-w-0 flex-1">
               {editingName ? (
                 <div className="flex gap-2">
@@ -229,6 +258,36 @@ export default function ProfilePage() {
               <RefreshCw className="h-4 w-4" />
             </button>
           </div>
+
+          {editingAvatar ? (
+            <div className="relative mt-4">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">
+                Choose your look
+              </p>
+              <div className="flex gap-2 overflow-x-auto pb-1">
+                {avatarChoices.map((opt) => (
+                  <button
+                    key={opt.style}
+                    type="button"
+                    disabled={savingAvatar}
+                    onClick={() => void pickAvatar(opt.url)}
+                    className={`shrink-0 overflow-hidden rounded-2xl ring-2 transition ${
+                      avatarUrl === opt.url
+                        ? "ring-coral"
+                        : "ring-transparent opacity-90 hover:opacity-100"
+                    }`}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={opt.url}
+                      alt={opt.style}
+                      className="h-14 w-14 bg-ink-3 object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
 
           <div className="relative mt-5">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted">

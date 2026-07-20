@@ -105,10 +105,22 @@ export class RealtimeClient {
   private handlers = new Set<Handler>();
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private userId: string;
+  private displayName: string;
+  private avatarUrl: string;
   private closedByUser = false;
 
-  constructor(userId: string) {
+  constructor(
+    userId: string,
+    opts?: { displayName?: string; avatarUrl?: string },
+  ) {
     this.userId = userId;
+    this.displayName = opts?.displayName || "User";
+    this.avatarUrl = opts?.avatarUrl || "";
+  }
+
+  setProfile(opts: { displayName?: string; avatarUrl?: string }) {
+    if (opts.displayName) this.displayName = opts.displayName;
+    if (opts.avatarUrl !== undefined) this.avatarUrl = opts.avatarUrl;
   }
 
   subscribe(handler: Handler) {
@@ -121,13 +133,29 @@ export class RealtimeClient {
     if (this.ws && (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING)) {
       return;
     }
-    const url = `${apiConfig.wsUrl}?userId=${encodeURIComponent(this.userId)}`;
+    const qs = new URLSearchParams({
+      userId: this.userId,
+      name: this.displayName,
+      role: "user",
+    });
+    if (this.avatarUrl) qs.set("avatar", this.avatarUrl);
+    const url = `${apiConfig.wsUrl}?${qs.toString()}`;
     const ws = new WebSocket(url);
     this.ws = ws;
 
     ws.onopen = () => {
       this.emit({ type: "connected", payload: { userId: this.userId } });
-      ws.send(JSON.stringify({ type: "hello", userId: this.userId }));
+      ws.send(
+        JSON.stringify({
+          type: "hello",
+          userId: this.userId,
+          payload: {
+            name: this.displayName,
+            userName: this.displayName,
+            avatarUrl: this.avatarUrl,
+          },
+        }),
+      );
     };
 
     ws.onmessage = (ev) => {
@@ -194,10 +222,15 @@ export class RealtimeClient {
 
 let singleton: RealtimeClient | null = null;
 
-export function getRealtimeClient(userId: string) {
+export function getRealtimeClient(
+  userId: string,
+  opts?: { displayName?: string; avatarUrl?: string },
+) {
   if (!singleton || (singleton as unknown as { userId: string }).userId !== userId) {
     singleton?.disconnect();
-    singleton = new RealtimeClient(userId);
+    singleton = new RealtimeClient(userId, opts);
+  } else if (opts) {
+    singleton.setProfile(opts);
   }
   return singleton;
 }
