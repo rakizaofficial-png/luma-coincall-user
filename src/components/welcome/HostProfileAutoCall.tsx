@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { AnimatePresence } from "framer-motion";
 import { IncomingCallLure } from "@/components/welcome/IncomingCallLure";
 import { TeaserCallPlayer } from "@/components/welcome/TeaserCallPlayer";
@@ -22,9 +23,11 @@ import type { DiscoverHost } from "@/lib/discoverHosts";
 const PROFILE_RING_DELAY_MS = 2_400;
 
 /**
- * Host profile auto-call: accept → 30s free preview → recharge popup → cut if no pay.
+ * Host profile auto-call: Accept → instant Agora bridge (zero-lag).
+ * Demo fallback keeps 30s preview → recharge if needed.
  */
 export function HostProfileAutoCall({ host }: { host: DiscoverHost }) {
+  const router = useRouter();
   const [phase, setPhase] = useState<WelcomePushPhase>("IDLE");
   const [caller, setCaller] = useState<WelcomePushHost | null>(null);
   const [statusLine, setStatusLine] = useState("Ringing…");
@@ -145,7 +148,13 @@ export function HostProfileAutoCall({ host }: { host: DiscoverHost }) {
   const accept = () => {
     stopWelcomeRingTone();
     if (ringTimer.current) clearTimeout(ringTimer.current);
-    // Always 30s free preview → then recharge (cut if no pay)
+    // Profile hosts are real — join Agora immediately (no loading gate)
+    const hid = caller?.host_id || host.id;
+    if (hid) {
+      setPhase("IDLE");
+      router.push(`/call/${encodeURIComponent(hid)}?live=1`);
+      return;
+    }
     setPhase("TEASER_PLAYING");
     teaserTimer.current = setTimeout(() => {
       setPhase("PAYWALL_BOOST");

@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect, useRef, useState } from "react";
+import { use, useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -63,6 +63,7 @@ export default function CallSessionClient({
     completeGiftEngagement,
     displayName: myDisplayName,
     applyLocalCoins,
+    openTopUp,
   } = useApp();
 
   const [trialMode, setTrialMode] = useState(false);
@@ -79,6 +80,9 @@ export default function CallSessionClient({
   const billingPausedRef = useRef(false);
   const billingBusyRef = useRef(false);
   const lowBalanceWarnedRef = useRef(false);
+  const lowBalance60WarnedRef = useRef(false);
+  const openTopUpRef = useRef(openTopUp);
+  openTopUpRef.current = openTopUp;
   const feedEndRef = useRef<HTMLDivElement>(null);
   const pushToastRef = useRef(pushToast);
   pushToastRef.current = pushToast;
@@ -179,8 +183,19 @@ export default function CallSessionClient({
   useEffect(() => {
     if (maxCallMinutes(coins, chargeRate) > 1) {
       lowBalanceWarnedRef.current = false;
+      lowBalance60WarnedRef.current = false;
     }
   }, [coins, chargeRate]);
+
+  /** Coins gone → open recharge + hang up cleanly (both sides leave) */
+  const exhaustAndRecharge = useCallback(async (msg?: string) => {
+    setLowBalanceOpen(true);
+    openTopUpRef.current(30);
+    pushToastRef.current(msg || "Coins exhausted — recharge to continue");
+    await hangUpRef.current();
+  }, []);
+  const exhaustRef = useRef(exhaustAndRecharge);
+  exhaustRef.current = exhaustAndRecharge;
 
   useEffect(() => {
     if (!isConnected) return;
@@ -212,10 +227,19 @@ export default function CallSessionClient({
         return;
       }
 
-      // 30s warning before balance can no longer cover another minute
+      // 60s toast + 30s popup before balance can no longer cover another minute
       const minutesLeft = maxCallMinutes(bal, charge);
       const secIntoMin = next % 60;
       const secsUntilExhaust = minutesLeft * 60 - secIntoMin;
+      if (
+        minutesLeft >= 1 &&
+        secsUntilExhaust <= 60 &&
+        secsUntilExhaust > 30 &&
+        !lowBalance60WarnedRef.current
+      ) {
+        lowBalance60WarnedRef.current = true;
+        pushToast("About 1 minute of coins left — recharge soon");
+      }
       if (
         minutesLeft >= 1 &&
         secsUntilExhaust <= 30 &&
@@ -224,15 +248,15 @@ export default function CallSessionClient({
       ) {
         lowBalanceWarnedRef.current = true;
         setLowBalanceOpen(true);
+        openTopUpRef.current(30);
         pushToast(
           "Your balance is running low. Please recharge to continue the call.",
         );
       }
 
-      // Strict: cannot afford host rate → disconnect both sides
+      // Strict: cannot afford host rate → disconnect both sides + recharge
       if (bal < charge && next > 2) {
-        pushToast("Insufficient balance, please recharge");
-        void hangUpRef.current();
+        void exhaustRef.current("Insufficient balance, please recharge");
         return;
       }
 
@@ -278,14 +302,44 @@ export default function CallSessionClient({
                 }
                 const nextBal = result.userBalance ?? coinsNow - amt;
                 if (nextBal < chargeNow) {
-                  pushToast("Coins exhausted. Disconnecting...");
-                  await hangUpRef.current();
+                  await exhaustRef.current();
                 } else if (maxCallMinutes(nextBal, chargeNow) <= 1) {
                   lowBalanceWarnedRef.current = false;
+                  lowBalance60WarnedRef.current = false;
                 }
               } else if (result.exhausted) {
-                pushToast("Coins exhausted. Disconnecting...");
-                await hangUpRef.current();
+                // RTDB may be stale — try Express wallet before cutting
+                await syncWallet?.();
+                if (coinsRef.current >= chargeNow && bridgeCall?.id && !isAi) {
+                  const expr = await billCallMinute(bridgeCall.id);
+                  if (expr.ok) {
+                    const amt = expr.amount ?? chargeNow;
+                    setDeductFlash(amt);
+                    setTimeout(() => setDeductFlash(null), 900);
+                    pushFeed(`−${amt} coins · 1 min`, "bill");
+                    await syncWallet?.();
+                    const nextBal = expr.coinBalance ?? coinsRef.current;
+                    if (nextBal < chargeNow) await exhaustRef.current();
+                  } else if (expr.exhausted) {
+                    await exhaustRef.current();
+                  } else {
+                    pushToast(expr.error || "Billing failed");
+                  }
+                } else if (coinsRef.current >= chargeNow) {
+                  const ok = await spendAsync(
+                    chargeNow,
+                    `−${chargeNow} coins · 1 min`,
+                  );
+                  if (ok) {
+                    setDeductFlash(chargeNow);
+                    setTimeout(() => setDeductFlash(null), 900);
+                    pushFeed(`−${chargeNow} coins · 1 min`, "bill");
+                  } else {
+                    await exhaustRef.current();
+                  }
+                } else {
+                  await exhaustRef.current();
+                }
               } else {
                 // Firebase failed — Express fallback (single path, no double charge)
                 if (bridgeCall?.id && !isAi) {
@@ -297,13 +351,9 @@ export default function CallSessionClient({
                     pushFeed(`−${amt} coins · 1 min`, "bill");
                     await syncWallet?.();
                     const nextBal = expr.coinBalance ?? coinsNow - amt;
-                    if (nextBal < chargeNow) {
-                      pushToast("Coins exhausted. Disconnecting...");
-                      await hangUpRef.current();
-                    }
+                    if (nextBal < chargeNow) await exhaustRef.current();
                   } else if (expr.exhausted) {
-                    pushToast("Coins exhausted. Disconnecting...");
-                    await hangUpRef.current();
+                    await exhaustRef.current();
                   } else {
                     pushToast(expr.error || result.error || "Billing failed");
                   }
@@ -317,8 +367,7 @@ export default function CallSessionClient({
                     setTimeout(() => setDeductFlash(null), 900);
                     pushFeed(`−${chargeNow} coins · 1 min`, "bill");
                   } else {
-                    pushToast("Coins exhausted. Disconnecting...");
-                    await hangUpRef.current();
+                    await exhaustRef.current();
                   }
                 }
               }
@@ -332,14 +381,13 @@ export default function CallSessionClient({
                 await syncWallet?.();
                 const nextBal = result.coinBalance ?? coinsNow - amt;
                 if (nextBal < chargeNow) {
-                  pushToast("Coins exhausted. Disconnecting...");
-                  await hangUpRef.current();
+                  await exhaustRef.current();
                 } else if (maxCallMinutes(nextBal, chargeNow) <= 1) {
                   lowBalanceWarnedRef.current = false;
+                  lowBalance60WarnedRef.current = false;
                 }
               } else if (result.exhausted) {
-                pushToast("Coins exhausted. Disconnecting...");
-                await hangUpRef.current();
+                await exhaustRef.current();
               } else {
                 pushToast(result.error || "Billing failed");
               }
@@ -364,8 +412,7 @@ export default function CallSessionClient({
                   pushFeed(`−${chargeNow} coins · 1 min`, "bill");
                   await syncWallet?.();
                 } catch {
-                  pushToast("Coins exhausted. Disconnecting...");
-                  await hangUpRef.current();
+                  await exhaustRef.current();
                 }
               }
             }

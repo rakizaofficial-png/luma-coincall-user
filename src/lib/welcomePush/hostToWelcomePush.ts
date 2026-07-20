@@ -2,10 +2,18 @@ import type { DiscoverHost } from "@/lib/discoverHosts";
 import { pickRandomPremiumCallMedia } from "@/lib/welcomePush/premiumCallMedia";
 import type { WelcomePushHost } from "@/lib/welcomePush/types";
 
+function isUsableHostDp(url: string | undefined | null): boolean {
+  const u = String(url || "").trim();
+  if (!u) return false;
+  if (u.startsWith("data:") || u.startsWith("blob:")) return false;
+  if (/dicebear|placeholder|ui-avatars|pravatar/i.test(u)) return false;
+  return u.startsWith("http://") || u.startsWith("https://") || u.startsWith("/");
+}
+
 /**
  * Map a profile / live host into a Welcome Push caller.
  * Always pairs an adult glamorous media pack (ring + teaser video).
- * Prefer pack girl still for ring UI when host DP is missing/placeholder.
+ * Prefer the host's real DP so Host App uploads sync into User App rings.
  */
 export function discoverHostToWelcomePush(
   host: Pick<
@@ -28,8 +36,8 @@ export function discoverHostToWelcomePush(
     host_id: host.id,
     name: displayName,
     age: host.age || 22,
-    // Ring background must be glam girl still (never city / crowd footage)
-    avatar: pack.avatar,
+    // Real host DP first — pack still only when DP missing/placeholder
+    avatar: isUsableHostDp(host.avatarUrl) ? String(host.avatarUrl).trim() : pack.avatar,
     ring_video_url: pack.ringVideo,
     teaser_video_url:
       process.env.NEXT_PUBLIC_WELCOME_TEASER_URL || pack.teaserVideo,

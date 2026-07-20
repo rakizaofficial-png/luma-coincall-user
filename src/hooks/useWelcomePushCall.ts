@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   WELCOME_PUSH_CONFIG,
   WELCOME_PUSH_HOST,
@@ -22,11 +23,13 @@ import { useApp } from "@/lib/store";
 
 /**
  * Lifecycle:
- * IDLE → INCOMING_CALL → Accept → TEASER (30s free preview)
- *      → PAYWALL_BOOST (recharge popup)
+ * IDLE → INCOMING_CALL → Accept →
+ *   live host → instant Agora call route (zero-lag)
+ *   demo → TEASER (30s free preview) → PAYWALL_BOOST
  *      → recharge OR offer expires / dismiss → call cut (IDLE)
  */
 export function useWelcomePushCall(opts: { enabled: boolean }) {
+  const router = useRouter();
   const { coins } = useApp();
   const coinsRef = useRef(coins);
   coinsRef.current = coins;
@@ -259,12 +262,19 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
       clearTimeout(ringTimer.current);
       ringTimer.current = null;
     }
-    // Always grant 30s free preview, then recharge popup (call cuts if no pay)
+    // Real online hosts: navigate to Agora bridge immediately (no spinner / freeze)
+    if (host.source === "live" && host.host_id) {
+      clearTimers();
+      setPhase("IDLE");
+      router.push(`/call/${encodeURIComponent(host.host_id)}?live=1`);
+      return;
+    }
+    // Demo / simulated hosts: 30s free preview → recharge popup
     setPhase("TEASER_PLAYING");
     teaserTimer.current = setTimeout(() => {
       setPhase("PAYWALL_BOOST");
     }, WELCOME_PUSH_CONFIG.teaserCutMs);
-  }, []);
+  }, [clearTimers, host.host_id, host.source, router]);
 
   const closePaywall = useCallback(() => {
     // Dismiss without recharge → cut call

@@ -28,13 +28,16 @@ export async function billCallMinute(callId: string): Promise<{
     error?: string;
     amount?: number;
     userWallet?: { coinBalance?: number };
+    wallet?: { coinBalance?: number };
   };
+  const coinBalance =
+    data.userWallet?.coinBalance ?? data.wallet?.coinBalance;
   if (res.status === 402) {
     return {
       ok: false,
       exhausted: true,
       error: data.error || "Coins exhausted",
-      coinBalance: data.userWallet?.coinBalance,
+      coinBalance,
     };
   }
   if (!res.ok) {
@@ -48,6 +51,6 @@ export async function billCallMinute(callId: string): Promise<{
     ok: true,
     exhausted: false,
     amount: data.amount,
-    coinBalance: data.userWallet?.coinBalance,
+    coinBalance,
   };
 }

@@ -1,12 +1,14 @@
 "use client";
 
 import Image from "next/image";
+import { useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { BadgeCheck, Crown, Globe2, Phone, PhoneOff, Sparkles } from "lucide-react";
 import type { WelcomePushHost } from "@/lib/welcomePush/config";
 
 /**
- * Full-screen incoming call lure — host profile photo only (no background video).
+ * Full-screen incoming call lure — looping ring video + hot thumbnail DP,
+ * single-click Accept / Reject (no loading gates).
  */
 export function IncomingCallLure({
   host,
@@ -19,6 +21,17 @@ export function IncomingCallLure({
   onAccept: () => void;
   onReject: () => void;
 }) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const el = videoRef.current;
+    if (!el) return;
+    el.muted = true;
+    el.playsInline = true;
+    el.loop = true;
+    void el.play().catch(() => undefined);
+  }, [host.ring_video_url]);
+
   return (
     <motion.div
       className="fixed inset-0 z-[100] mx-auto flex w-full max-w-[430px] flex-col overflow-hidden bg-[#06040b]"
@@ -27,23 +40,21 @@ export function IncomingCallLure({
       exit={{ opacity: 0, y: 16, scale: 0.98 }}
       transition={{ type: "spring", stiffness: 320, damping: 28 }}
     >
-      <motion.div
-        className="absolute inset-0"
-        initial={{ scale: 1.06 }}
-        animate={{ scale: 1.14 }}
-        transition={{ duration: 16, ease: "linear", repeat: Infinity, repeatType: "reverse" }}
-      >
-        <Image
-          src={host.avatar}
-          alt=""
-          fill
-          priority
-          className="object-cover object-top"
-          sizes="430px"
+      <div className="absolute inset-0">
+        <video
+          ref={videoRef}
+          className="h-full w-full object-cover"
+          src={host.ring_video_url}
+          muted
+          playsInline
+          loop
+          autoPlay
+          preload="auto"
+          poster={host.avatar}
         />
-      </motion.div>
+      </div>
 
-      <div className="absolute inset-0 bg-gradient-to-b from-black/70 via-[#06040b]/40 to-[#06040b]/95" />
+      <div className="absolute inset-0 bg-gradient-to-b from-black/75 via-[#06040b]/45 to-[#06040b]/95" />
 
       <motion.div
         aria-hidden
@@ -78,173 +89,99 @@ export function IncomingCallLure({
           <motion.span
             className="absolute -inset-4 rounded-full border-2 border-cyan/50"
             animate={{ scale: [1, 1.14, 1], opacity: [0.75, 0.15, 0.75] }}
-            transition={{ duration: 1.35, repeat: Infinity }}
+            transition={{ duration: 1.6, repeat: Infinity }}
           />
           <motion.span
-            className="absolute -inset-9 rounded-full border border-coral/35"
-            animate={{ scale: [1, 1.22, 1], opacity: [0.55, 0.08, 0.55] }}
-            transition={{ duration: 1.75, repeat: Infinity, delay: 0.18 }}
+            className="absolute -inset-8 rounded-full border border-coral/35"
+            animate={{ scale: [1, 1.2, 1], opacity: [0.5, 0.05, 0.5] }}
+            transition={{ duration: 2.1, repeat: Infinity, delay: 0.25 }}
           />
-          <motion.div
-            initial={{ scale: 0.86, opacity: 0 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: "spring", stiffness: 260, damping: 18 }}
-          >
+          <div className="relative h-36 w-36 overflow-hidden rounded-full border-[3px] border-white/90 shadow-[0_0_40px_rgba(255,80,120,0.45)]">
             <Image
               src={host.avatar}
-              alt=""
-              width={140}
-              height={140}
-              className="relative h-[140px] w-[140px] rounded-full object-cover object-top ring-4 ring-cyan/60 shadow-[0_0_40px_rgba(0,240,255,0.45)]"
+              alt={host.name}
+              fill
+              priority
+              className="object-cover object-top"
+              sizes="144px"
             />
-          </motion.div>
-
-          <div className="absolute -bottom-1 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1">
-            {host.isVerified && (
-              <span className="inline-flex items-center gap-0.5 rounded-full border border-cyan/40 bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-cyan backdrop-blur">
-                <BadgeCheck className="h-3 w-3" /> Verified
-              </span>
-            )}
-            {host.isVip && (
-              <span className="inline-flex items-center gap-0.5 rounded-full border border-gold/50 bg-black/70 px-1.5 py-0.5 text-[9px] font-bold text-gold backdrop-blur">
-                <Crown className="h-3 w-3" /> VIP
-              </span>
-            )}
           </div>
+          {host.isVip ? (
+            <span className="absolute -right-1 -top-1 flex h-9 w-9 items-center justify-center rounded-full bg-gold text-ink shadow-lg">
+              <Crown className="h-4 w-4" />
+            </span>
+          ) : null}
+          {host.isVerified ? (
+            <span className="absolute -bottom-1 -left-1 flex h-8 w-8 items-center justify-center rounded-full bg-cyan text-ink shadow-lg">
+              <BadgeCheck className="h-4 w-4" />
+            </span>
+          ) : null}
         </div>
 
         <motion.h1
-          className="mt-7 font-display text-4xl font-extrabold text-white drop-shadow-[0_0_20px_rgba(0,240,255,0.35)]"
+          className="mt-6 font-display text-3xl font-extrabold tracking-tight text-white"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.12 }}
         >
           {host.name}
+          {host.age ? (
+            <span className="text-white/70">, {host.age}</span>
+          ) : null}
         </motion.h1>
 
-        <motion.div
-          className="mt-2 flex flex-wrap items-center justify-center gap-2 text-[11px] font-semibold text-white/80"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-        >
-          <span>
-            {host.age} · {host.flag} {host.country}
-          </span>
-          <span className="text-white/30">·</span>
-          <span className="inline-flex items-center gap-1 text-cyan/90">
-            <Sparkles className="h-3 w-3" /> Lv.{host.level}
-          </span>
-          {host.isOnline && (
-            <>
-              <span className="text-white/30">·</span>
-              <span className="inline-flex items-center gap-1 text-teal">
-                <span className="h-1.5 w-1.5 rounded-full bg-teal" /> Online
-              </span>
-            </>
-          )}
-        </motion.div>
+        <p className="mt-2 flex items-center gap-1.5 text-sm text-white/75">
+          <Globe2 className="h-3.5 w-3.5 text-cyan" />
+          {host.flag} {host.country}
+          <span className="text-white/40">·</span>
+          {host.language}
+        </p>
 
         <motion.p
-          className="mt-3 max-w-[18rem] text-center text-sm font-semibold leading-snug text-cyan/95"
+          className="mt-4 max-w-[18rem] text-center text-[15px] font-medium leading-snug text-white/90"
+          key={statusLine}
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.28 }}
-          key={host.messageId}
-        >
-          “{host.message}”
-        </motion.p>
-
-        <motion.p
-          className="mt-2 max-w-[17rem] text-center text-[11px] text-white/55"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.34 }}
-        >
-          {host.bio}
-        </motion.p>
-
-        <div className="mt-3 flex flex-wrap items-center justify-center gap-1.5">
-          <span className="inline-flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-white/70">
-            <Globe2 className="h-3 w-3 text-cyan/80" />
-            {host.language}
-          </span>
-          <span className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[10px] font-semibold text-gold/90">
-            {host.durationPreview}
-          </span>
-          {host.interests.slice(0, 3).map((tag) => (
-            <span
-              key={tag}
-              className="rounded-full border border-coral/25 bg-coral/10 px-2 py-0.5 text-[10px] font-semibold text-[#ff9ec0]"
-            >
-              {tag}
-            </span>
-          ))}
-        </div>
-
-        <motion.p
-          className="mt-5 text-xs font-bold uppercase tracking-widest text-gold"
-          animate={{ opacity: [1, 0.4, 1] }}
-          transition={{ duration: 1.15, repeat: Infinity }}
-          key={statusLine}
         >
           {statusLine}
         </motion.p>
+
+        <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/80 backdrop-blur">
+          <Sparkles className="h-3 w-3 text-gold" />
+          {host.durationPreview || "Private video"}
+        </p>
       </div>
 
-      <div className="relative z-10 w-full px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-4">
-        <div className="mb-3 flex items-center justify-center gap-2">
-          <span className="h-1 w-1 animate-ping rounded-full bg-teal" />
-          <p className="text-[11px] font-semibold text-white/70">
-            Tap Accept to answer · {host.durationPreview}
-          </p>
-        </div>
-
-        <div className="flex w-full items-stretch gap-3">
-          <motion.button
-            type="button"
-            onClick={onReject}
-            whileTap={{ scale: 0.96 }}
-            className="flex w-[30%] flex-col items-center justify-center gap-2 rounded-[1.5rem] border border-white/15 bg-white/10 py-5 backdrop-blur-md"
-            aria-label="Decline"
+      <div className="relative z-10 flex items-center justify-center gap-14 px-8 pb-[max(2rem,env(safe-area-inset-bottom))] pt-4">
+        <button
+          type="button"
+          onClick={onReject}
+          className="flex flex-col items-center gap-2"
+          aria-label="Reject call"
+        >
+          <span className="flex h-16 w-16 items-center justify-center rounded-full bg-rose-600 text-white shadow-lg shadow-rose-900/40 active:scale-95">
+            <PhoneOff className="h-7 w-7" />
+          </span>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-white/70">
+            Decline
+          </span>
+        </button>
+        <button
+          type="button"
+          onClick={onAccept}
+          className="flex flex-col items-center gap-2"
+          aria-label="Accept call"
+        >
+          <motion.span
+            className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-900/40 active:scale-95"
+            animate={{ scale: [1, 1.06, 1] }}
+            transition={{ duration: 1.1, repeat: Infinity }}
           >
-            <span className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500 shadow-[0_0_24px_rgba(239,68,68,0.55)]">
-              <PhoneOff className="h-7 w-7 text-white" />
-            </span>
-            <span className="text-xs font-bold text-white/80">Decline</span>
-          </motion.button>
-
-          <motion.button
-            type="button"
-            onClick={onAccept}
-            whileTap={{ scale: 0.97 }}
-            initial={{ scale: 0.94, opacity: 0.85 }}
-            animate={{ scale: 1, opacity: 1 }}
-            transition={{ type: "spring", stiffness: 280, damping: 16, delay: 0.2 }}
-            className="flex w-[70%] flex-col items-center justify-center gap-2 rounded-[1.5rem] border border-emerald-400/50 bg-gradient-to-b from-emerald-400/30 to-emerald-600/40 py-5 shadow-[0_0_40px_rgba(16,185,129,0.45)] backdrop-blur-md"
-            aria-label="Accept call"
-          >
-            <motion.span
-              className="flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500 shadow-[0_0_32px_rgba(16,185,129,0.7)]"
-              animate={{
-                boxShadow: [
-                  "0 0 24px rgba(16,185,129,0.5)",
-                  "0 0 40px rgba(16,185,129,0.85)",
-                  "0 0 24px rgba(16,185,129,0.5)",
-                ],
-              }}
-              transition={{ duration: 1.4, repeat: Infinity }}
-            >
-              <Phone className="h-8 w-8 text-white" fill="currentColor" />
-            </motion.span>
-            <span className="font-display text-lg font-extrabold text-white">
-              Accept
-            </span>
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-emerald-100/90">
-              Answer private call
-            </span>
-          </motion.button>
-        </div>
+            <Phone className="h-7 w-7" />
+          </motion.span>
+          <span className="text-[11px] font-bold uppercase tracking-wider text-white/70">
+            Accept
+          </span>
+        </button>
       </div>
     </motion.div>
   );
