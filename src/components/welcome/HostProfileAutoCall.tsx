@@ -28,8 +28,10 @@ export function HostProfileAutoCall({ host }: { host: DiscoverHost }) {
   const [phase, setPhase] = useState<WelcomePushPhase>("IDLE");
   const [caller, setCaller] = useState<WelcomePushHost | null>(null);
   const [statusLine, setStatusLine] = useState("Ringing…");
-  const [offerLeft, setOfferLeft] = useState(WELCOME_PUSH_CONFIG.offerSeconds);
-  const [previewLeft, setPreviewLeft] = useState(30);
+  const [offerLeft, setOfferLeft] = useState<number>(
+    WELCOME_PUSH_CONFIG.offerSeconds,
+  );
+  const [previewLeft, setPreviewLeft] = useState<number>(30);
   const firedForId = useRef<string | null>(null);
   const ringTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const teaserTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
