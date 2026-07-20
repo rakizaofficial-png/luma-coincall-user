@@ -20,6 +20,10 @@ export function makeReferralCode() {
   return `LUMA${seed}`;
 }
 
+/**
+ * Deterministic empty state for SSR + first client paint.
+ * Never read localStorage or Math.random here — avoids hydration mismatches.
+ */
 export function emptyEngagement(): EngagementState {
   const missions: Record<MissionId, number> = {
     open_app: 0,
@@ -41,8 +45,8 @@ export function emptyEngagement(): EngagementState {
     badges: [],
     missionProgress: missions,
     missionClaimed: [],
-    weeklyMissionReset: weekKey(),
-    referralCode: makeReferralCode(),
+    weeklyMissionReset: "1970-W01",
+    referralCode: "LUMA------",
     referralClaims: 0,
     freeTrialUsed: false,
     freeTrialActive: false,
@@ -56,7 +60,11 @@ export function loadEngagement(): EngagementState {
   try {
     const raw = localStorage.getItem(KEY);
     if (!raw) {
-      const fresh = emptyEngagement();
+      const fresh = {
+        ...emptyEngagement(),
+        referralCode: makeReferralCode(),
+        weeklyMissionReset: weekKey(),
+      };
       saveEngagement(fresh);
       return fresh;
     }

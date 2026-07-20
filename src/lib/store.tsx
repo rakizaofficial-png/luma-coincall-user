@@ -32,6 +32,7 @@ import {
   spinLuckyWheel,
   canUseFreeTrial,
   getEngagement,
+  emptyEngagement,
   nextCheckInReward,
   spinsRemaining,
   appendLocalHistory,
@@ -120,9 +121,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [topUpGrace, setTopUpGrace] = useState(15);
   const [entranceBlast, setEntranceBlast] = useState(false);
   const [entranceReady, setEntranceReady] = useState(false);
-  const [engagement, setEngagement] = useState<EngagementState>(() =>
-    typeof window === "undefined" ? getEngagement() : getEngagement(),
-  );
+  const [engagement, setEngagement] = useState<EngagementState>(emptyEngagement);
   const [coinBurst, setCoinBurst] = useState(0);
   const graceRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -143,6 +142,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshEngagement = useCallback(() => {
+    setEngagement(getEngagement());
+  }, []);
+
+  // Load localStorage engagement only after mount (SSR-safe)
+  useEffect(() => {
     setEngagement(getEngagement());
   }, []);
 
