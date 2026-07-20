@@ -156,11 +156,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setAvatarUrl(local.avatarUrl);
     } else {
       setUserId(wallet.userId || local.userId);
-      setDisplayName(
-        wallet.displayName?.trim()
+      const name =
+        wallet.displayName?.trim() &&
+        wallet.displayName !== "Luma Fan"
           ? wallet.displayName
-          : local.displayName,
-      );
+          : local.displayName;
+      setDisplayName(name);
       setAvatarUrl(wallet.avatarUrl || local.avatarUrl);
     }
     setCoins(wallet.coinBalance);
@@ -235,7 +236,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setReady(true);
         setEntranceReady(true);
 
-        if (wallet.created) {
+        if (wallet.welcomeBonus) {
           pushToast("Profile created · +100 welcome coins");
         }
 

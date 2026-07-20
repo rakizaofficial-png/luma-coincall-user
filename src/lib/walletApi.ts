@@ -8,6 +8,10 @@ import { requireApiBase } from "@/config/apiConfig";
 import {
   ensureDeviceUserId,
   ensureLocalProfile,
+  hasWelcomeBonusClaimed,
+  isGenericDisplayName,
+  markWelcomeBonusClaimed,
+  updateLocalAvatar,
   updateLocalDisplayName,
 } from "@/lib/userProfile";
 
@@ -20,6 +24,8 @@ export type WalletSnapshot = {
   avatarUrl?: string;
   appId?: string;
   created?: boolean;
+  /** True only when server actually credited +100 this request */
+  welcomeBonus?: boolean;
 };
 
 function deviceUserId(): string {
@@ -52,22 +58,66 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
  */
 export async function fetchOrCreateWallet(): Promise<WalletSnapshot> {
   const local = ensureLocalProfile();
-  const data = await api<{ wallet: WalletSnapshot; created?: boolean }>(
-    "/wallet/me",
-    {
+  const data = await api<{
+    wallet: WalletSnapshot;
+    created?: boolean;
+    welcomeBonus?: boolean;
+  }>("/wallet/me", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: local.userId,
+      displayName: local.displayName,
+      avatarUrl: local.avatarUrl,
+      welcomeAlreadyClaimed: hasWelcomeBonusClaimed(local.userId),
+    }),
+  });
+  const wallet = data.wallet;
+  const welcomeBonus = Boolean(data.welcomeBonus);
+
+  if (welcomeBonus || data.created) {
+    markWelcomeBonusClaimed(local.userId);
+  }
+
+  // Prefer unique local identity over generic server defaults
+  if (
+    wallet.displayName &&
+    !isGenericDisplayName(wallet.displayName) &&
+    wallet.displayName !== local.displayName
+  ) {
+    updateLocalDisplayName(wallet.displayName);
+  } else if (
+    isGenericDisplayName(wallet.displayName) &&
+    !isGenericDisplayName(local.displayName)
+  ) {
+    void api("/wallet/me", {
       method: "POST",
       body: JSON.stringify({
         userId: local.userId,
         displayName: local.displayName,
         avatarUrl: local.avatarUrl,
+        updateProfile: true,
+        welcomeAlreadyClaimed: true,
       }),
-    },
-  );
-  const wallet = data.wallet;
-  if (wallet.displayName && wallet.displayName !== local.displayName) {
-    updateLocalDisplayName(wallet.displayName);
+    }).catch(() => undefined);
   }
-  return { ...wallet, created: Boolean(data.created) };
+
+  if (
+    wallet.avatarUrl &&
+    wallet.avatarUrl !== local.avatarUrl &&
+    !isGenericDisplayName(wallet.displayName)
+  ) {
+    updateLocalAvatar(wallet.avatarUrl);
+  }
+
+  return {
+    ...wallet,
+    displayName: isGenericDisplayName(wallet.displayName)
+      ? local.displayName
+      : wallet.displayName || local.displayName,
+    avatarUrl: wallet.avatarUrl || local.avatarUrl,
+    created: Boolean(data.created),
+    welcomeBonus,
+  };
 }
 
 /** Update display name on device + server (same userId) */
