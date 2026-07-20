@@ -1,6 +1,6 @@
 /**
- * Mobile fake-call media — portrait girl clips + South/East Asian glam stills.
- * Ring backgrounds must be women (never city crowds / traffic).
+ * Mobile fake-call media — Asian profile DPs (custom) + portrait waiting clips.
+ * All automated-call posters use the curated Asian host set.
  */
 
 export type MobileFakeCallClip = {
@@ -13,8 +13,20 @@ export type MobileFakeCallClip = {
   vibe: "glam" | "selfie" | "fashion" | "soft";
 };
 
-const U = (id: string) =>
-  `https://images.unsplash.com/photo-${id}?w=720&h=1280&fit=crop&q=85&crop=faces`;
+/** Public site origin for static DPs under /hosts/asian */
+function siteOrigin() {
+  return (
+    process.env.NEXT_PUBLIC_APP_URL ||
+    process.env.NEXT_PUBLIC_SITE_URL ||
+    "https://luma-user.onrender.com"
+  ).replace(/\/$/, "");
+}
+
+/** Custom Asian automated-call display pictures */
+export function asianHostDp(n: number): string {
+  const i = ((Math.floor(n) - 1) % 7 + 7) % 7 + 1;
+  return `${siteOrigin()}/hosts/asian/${String(i).padStart(2, "0")}.png`;
+}
 
 /** Verified portrait Pexels files (720×1280) — woman on camera */
 const PEXELS_PORTRAIT = {
@@ -25,93 +37,58 @@ const PEXELS_PORTRAIT = {
 } as const;
 
 /**
- * Curated “waiting for you” packs — Asian / Indian / Pakistani aesthetic posters
- * paired with portrait waiting videos (object-cover on phones).
+ * All automated-call packs use Asian custom DPs (user-provided photos).
+ * Videos stay as portrait waiting clips for the ring UI.
  */
 export const MOBILE_FAKE_CALL_CLIPS: readonly MobileFakeCallClip[] = [
   {
-    id: "asia_glam_01",
-    region: "asian",
-    vibe: "glam",
-    poster: U("1531746020798-e6953c440e19"),
-    videoUrl: PEXELS_PORTRAIT.waiting_01,
-  },
-  {
-    id: "asia_soft_01",
-    region: "asian",
-    vibe: "soft",
-    poster: U("1589156280159-276898a88479"),
-    videoUrl: PEXELS_PORTRAIT.waiting_02,
-  },
-  {
-    id: "asia_fashion_01",
-    region: "asian",
-    vibe: "fashion",
-    poster: U("1517841905240-472988babdf9"),
-    videoUrl: PEXELS_PORTRAIT.waiting_01,
-  },
-  {
-    id: "india_glam_01",
-    region: "indian",
-    vibe: "glam",
-    poster: U("1594744803329-e922feee73db"),
-    videoUrl: PEXELS_PORTRAIT.waiting_02,
-  },
-  {
-    id: "india_soft_01",
-    region: "indian",
-    vibe: "soft",
-    poster: U("1573496359142-b8d87734a5a2"),
-    videoUrl: PEXELS_PORTRAIT.waiting_01,
-  },
-  {
-    id: "india_selfie_01",
-    region: "indian",
-    vibe: "selfie",
-    poster: U("1544005313-94ddf0286df2"),
-    videoUrl: PEXELS_PORTRAIT.waiting_02,
-  },
-  {
-    id: "pak_glam_01",
-    region: "pakistani",
-    vibe: "glam",
-    poster: U("1524504388940-b1c1722653e1"),
-    videoUrl: PEXELS_PORTRAIT.waiting_01,
-  },
-  {
-    id: "pak_soft_01",
-    region: "pakistani",
-    vibe: "soft",
-    poster: U("1487412720507-e7ab37603c6f"),
-    videoUrl: PEXELS_PORTRAIT.waiting_02,
-  },
-  {
-    id: "asia_wait_01",
+    id: "asia_dp_01",
     region: "asian",
     vibe: "selfie",
-    poster: U("1534528741775-53994a69daeb"),
+    poster: asianHostDp(1),
     videoUrl: PEXELS_PORTRAIT.waiting_01,
   },
   {
-    id: "india_wait_01",
-    region: "indian",
-    vibe: "fashion",
-    poster: U("1529626455594-4ff0802cfb7e"),
+    id: "asia_dp_02",
+    region: "asian",
+    vibe: "soft",
+    poster: asianHostDp(2),
     videoUrl: PEXELS_PORTRAIT.waiting_02,
   },
   {
-    id: "pak_wait_01",
-    region: "pakistani",
-    vibe: "glam",
-    poster: U("1494790108377-be9c29b29330"),
+    id: "asia_dp_03",
+    region: "asian",
+    vibe: "fashion",
+    poster: asianHostDp(3),
     videoUrl: PEXELS_PORTRAIT.waiting_01,
   },
   {
-    id: "asia_glow_01",
+    id: "asia_dp_04",
     region: "asian",
     vibe: "glam",
-    poster: U("1502823403499-6ccfcf4fb453"),
+    poster: asianHostDp(4),
     videoUrl: PEXELS_PORTRAIT.waiting_02,
+  },
+  {
+    id: "asia_dp_05",
+    region: "asian",
+    vibe: "soft",
+    poster: asianHostDp(5),
+    videoUrl: PEXELS_PORTRAIT.waiting_01,
+  },
+  {
+    id: "asia_dp_06",
+    region: "asian",
+    vibe: "glam",
+    poster: asianHostDp(6),
+    videoUrl: PEXELS_PORTRAIT.waiting_02,
+  },
+  {
+    id: "asia_dp_07",
+    region: "asian",
+    vibe: "fashion",
+    poster: asianHostDp(7),
+    videoUrl: PEXELS_PORTRAIT.waiting_01,
   },
 ];
 

@@ -42,12 +42,8 @@ export function pickPremiumCallMedia(index = 0): PremiumCallMediaPack {
 export function pickRandomPremiumCallMedia(
   avoidIds: string[] = [],
 ): PremiumCallMediaPack {
-  // Bias toward Asian / Indian / Pakistani packs for ring backgrounds
-  const c = pickRandomMobileFakeCallClip(avoidIds, [
-    "asian",
-    "indian",
-    "pakistani",
-  ]);
+  // Bias toward Asian packs for ring backgrounds (all packs are Asian DPs)
+  const c = pickRandomMobileFakeCallClip(avoidIds, ["asian"]);
   return {
     id: c.id,
     vibe: c.vibe,

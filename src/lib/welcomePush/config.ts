@@ -16,10 +16,9 @@ export type {
 /** @deprecated Prefer pickNextWelcomeCaller() — kept for type-compat imports */
 export const WELCOME_PUSH_HOST: WelcomePushHost = {
   host_id: "sim_f_boot",
-  name: "Mira",
-  age: 23,
-  avatar:
-    "https://images.unsplash.com/photo-1531746020798-e6953c440e19?w=720&h=1280&fit=crop&q=85&crop=faces",
+  name: "Yuna",
+  age: 22,
+  avatar: "https://luma-user.onrender.com/hosts/asian/01.png",
   ring_video_url:
     "https://videos.pexels.com/video-files/2499611/2499611-hd_720_1280_30fps.mp4",
   teaser_video_url:
@@ -38,7 +37,7 @@ export const WELCOME_PUSH_HOST: WelcomePushHost = {
   message: "Hi, I'm online now.",
   messageId: "m01",
   source: "demo",
-  mediaPackId: "asia_glam_01",
+  mediaPackId: "asia_dp_01",
 };
 
 export function buildPaywallTiers(hostName: string): WelcomePaywallTier[] {
@@ -95,5 +94,5 @@ export const WELCOME_PUSH_CONFIG = {
   hostCooldownCount: 10,
   messageCooldownCount: 14,
   /** Bump when media / timing rules change */
-  storageKey: "luma_welcome_push_v7",
+  storageKey: "luma_welcome_push_v8_asian",
 } as const;

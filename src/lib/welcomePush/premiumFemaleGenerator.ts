@@ -13,7 +13,7 @@ import {
 } from "./premiumCallMedia";
 import type { WelcomePushHost } from "./types";
 
-const POOL_KEY = "luma_sim_female_pool_v2";
+const POOL_KEY = "luma_sim_female_pool_v3_asian";
 const POOL_SIZE = 36;
 
 /** @deprecated Prefer pack.teaserVideo — kept for external CDN override */
@@ -26,11 +26,10 @@ export const SAFE_PREMIUM_FEMALE_AVATARS = PREMIUM_FULLBODY_AVATARS;
 export const PREMIUM_FEMALE_AVATARS = SAFE_PREMIUM_FEMALE_AVATARS;
 
 const FIRST_NAMES = [
-  "Mira", "Sofia", "Aya", "Lina", "Elena", "Noor", "Zara", "Hana", "Priya",
-  "Amira", "Yuna", "Luna", "Maya", "Sara", "Nina", "Isla", "Aria", "Leia",
-  "Ruby", "Valentina", "Chloe", "Mei", "Fatima", "Aisha", "Layla", "Nadia",
-  "Sienna", "Nova", "Camila", "Kiara", "Ananya", "Yasmine", "Bianca", "Rina",
-  "Daria", "Selena",
+  "Yuna", "Mei", "Aya", "Hana", "Rin", "Sora", "Lina", "Mira", "Kei",
+  "Nami", "Yuki", "Jia", "Sakura", "Min", "Noa", "Eun", "Rina", "Aiko",
+  "Chae", "Hye", "Mai", "Linh", "Ploy", "Anya", "Suki", "Kira", "Zoe",
+  "Nina", "Lara", "Mika", "Tala", "Wina", "Bella", "Nova", "Sky", "Jade",
 ] as const;
 
 const LAST_NAMES = [
@@ -38,23 +37,18 @@ const LAST_NAMES = [
   "Nova", "Kiss", "Star", "Jade", "Pearl", "Flame",
 ] as const;
 
+/** Asian locales first — automated calls are Asian-profile only */
 const LOCALES: { country: string; flag: string; language: string }[] = [
   { country: "Korea", flag: "🇰🇷", language: "Korean · English" },
-  { country: "Brazil", flag: "🇧🇷", language: "Portuguese · English" },
   { country: "Japan", flag: "🇯🇵", language: "Japanese · English" },
-  { country: "Turkey", flag: "🇹🇷", language: "Turkish · English" },
-  { country: "Spain", flag: "🇪🇸", language: "Spanish · English" },
-  { country: "UAE", flag: "🇦🇪", language: "Arabic · English" },
-  { country: "India", flag: "🇮🇳", language: "Hindi · English" },
+  { country: "China", flag: "🇨🇳", language: "Mandarin · English" },
   { country: "Thailand", flag: "🇹🇭", language: "Thai · English" },
-  { country: "Mexico", flag: "🇲🇽", language: "Spanish · English" },
-  { country: "France", flag: "🇫🇷", language: "French · English" },
-  { country: "Italy", flag: "🇮🇹", language: "Italian · English" },
-  { country: "Colombia", flag: "🇨🇴", language: "Spanish · English" },
-  { country: "Philippines", flag: "🇵🇭", language: "Tagalog · English" },
-  { country: "USA", flag: "🇺🇸", language: "English" },
-  { country: "UK", flag: "🇬🇧", language: "English" },
   { country: "Indonesia", flag: "🇮🇩", language: "Indonesian · English" },
+  { country: "Philippines", flag: "🇵🇭", language: "Tagalog · English" },
+  { country: "Vietnam", flag: "🇻🇳", language: "Vietnamese · English" },
+  { country: "Taiwan", flag: "🇹🇼", language: "Mandarin · English" },
+  { country: "Singapore", flag: "🇸🇬", language: "English · Mandarin" },
+  { country: "Malaysia", flag: "🇲🇾", language: "Malay · English" },
 ];
 
 const BIOS = [

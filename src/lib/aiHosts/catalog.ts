@@ -1,6 +1,9 @@
 import type { AiHostRecord } from "./types";
 import { filterFemaleHosts, isFemaleHostProfile } from "@/lib/femaleHosts";
-import { pickMobileFakeCallClip } from "@/lib/welcomePush/mobileFakeCallVideos";
+import {
+  asianHostDp,
+  pickMobileFakeCallClip,
+} from "@/lib/welcomePush/mobileFakeCallVideos";
 
 /**
  * Replace this in-memory table with your real DB (Postgres / Firestore / Supabase).
@@ -15,7 +18,7 @@ function clip(hostId: string, file: "intro" | "loop", demo: string) {
   return `${CDN}/${hostId}/${file}.mp4`;
 }
 
-function avatar(hostId: string, seed: string, poster: string) {
+function avatar(hostId: string, poster: string) {
   if (CDN) return `${CDN}/${hostId}/avatar.jpg`;
   return poster;
 }
@@ -24,66 +27,90 @@ function packFor(i: number) {
   return pickMobileFakeCallClip(i);
 }
 
-/** AI Host Database Table (seed) — premium female hosts, mobile fake-call clips */
+/** AI Host Database — Asian automated-call profiles with custom DPs */
 export const AI_HOST_TABLE: AiHostRecord[] = [
   {
-    host_id: "ai_mira",
-    name: "Mira",
-    avatar: avatar("ai_mira", "ai-mira-luma", packFor(0).poster),
-    video_url_1: clip("ai_mira", "intro", packFor(0).videoUrl),
-    video_url_2: clip("ai_mira", "loop", packFor(1).videoUrl),
-    age: 23,
+    host_id: "ai_yuna",
+    name: "Yuna",
+    avatar: avatar("ai_yuna", asianHostDp(1)),
+    video_url_1: clip("ai_yuna", "intro", packFor(0).videoUrl),
+    video_url_2: clip("ai_yuna", "loop", packFor(1).videoUrl),
+    age: 22,
     cost_per_minute: 80,
     country: "Korea",
-    tags: ["chill", "night"],
+    tags: ["chill", "night", "asian"],
     gender: "female",
   },
   {
-    host_id: "ai_sofia",
-    name: "Sofia",
-    avatar: avatar("ai_sofia", "ai-sofia-luma", packFor(2).poster),
-    video_url_1: clip("ai_sofia", "intro", packFor(2).videoUrl),
-    video_url_2: clip("ai_sofia", "loop", packFor(3).videoUrl),
-    age: 25,
-    cost_per_minute: 95,
-    country: "Brazil",
-    tags: ["dance", "fun"],
+    host_id: "ai_mei",
+    name: "Mei",
+    avatar: avatar("ai_mei", asianHostDp(2)),
+    video_url_1: clip("ai_mei", "intro", packFor(1).videoUrl),
+    video_url_2: clip("ai_mei", "loop", packFor(2).videoUrl),
+    age: 24,
+    cost_per_minute: 85,
+    country: "China",
+    tags: ["soft", "talk", "asian"],
     gender: "female",
   },
   {
     host_id: "ai_aya",
     name: "Aya",
-    avatar: avatar("ai_aya", "ai-aya-luma", packFor(4).poster),
-    video_url_1: clip("ai_aya", "intro", packFor(4).videoUrl),
-    video_url_2: clip("ai_aya", "loop", packFor(5).videoUrl),
-    age: 22,
-    cost_per_minute: 70,
+    avatar: avatar("ai_aya", asianHostDp(3)),
+    video_url_1: clip("ai_aya", "intro", packFor(2).videoUrl),
+    video_url_2: clip("ai_aya", "loop", packFor(3).videoUrl),
+    age: 23,
+    cost_per_minute: 75,
     country: "Japan",
-    tags: ["calm", "talk"],
+    tags: ["fashion", "calm", "asian"],
+    gender: "female",
+  },
+  {
+    host_id: "ai_hana",
+    name: "Hana",
+    avatar: avatar("ai_hana", asianHostDp(4)),
+    video_url_1: clip("ai_hana", "intro", packFor(3).videoUrl),
+    video_url_2: clip("ai_hana", "loop", packFor(4).videoUrl),
+    age: 21,
+    cost_per_minute: 70,
+    country: "Indonesia",
+    tags: ["sweet", "selfie", "asian"],
+    gender: "female",
+  },
+  {
+    host_id: "ai_rin",
+    name: "Rin",
+    avatar: avatar("ai_rin", asianHostDp(5)),
+    video_url_1: clip("ai_rin", "intro", packFor(4).videoUrl),
+    video_url_2: clip("ai_rin", "loop", packFor(5).videoUrl),
+    age: 25,
+    cost_per_minute: 90,
+    country: "Japan",
+    tags: ["glam", "vip", "asian"],
+    gender: "female",
+  },
+  {
+    host_id: "ai_sora",
+    name: "Sora",
+    avatar: avatar("ai_sora", asianHostDp(6)),
+    video_url_1: clip("ai_sora", "intro", packFor(5).videoUrl),
+    video_url_2: clip("ai_sora", "loop", packFor(6).videoUrl),
+    age: 22,
+    cost_per_minute: 80,
+    country: "Korea",
+    tags: ["party", "night", "asian"],
     gender: "female",
   },
   {
     host_id: "ai_lina",
     name: "Lina",
-    avatar: avatar("ai_lina", "ai-lina-luma", packFor(6).poster),
+    avatar: avatar("ai_lina", asianHostDp(7)),
     video_url_1: clip("ai_lina", "intro", packFor(6).videoUrl),
-    video_url_2: clip("ai_lina", "loop", packFor(7).videoUrl),
+    video_url_2: clip("ai_lina", "loop", packFor(0).videoUrl),
     age: 24,
     cost_per_minute: 85,
-    country: "Turkey",
-    tags: ["party", "warm"],
-    gender: "female",
-  },
-  {
-    host_id: "ai_elena",
-    name: "Elena",
-    avatar: avatar("ai_elena", "ai-elena-luma", packFor(8).poster),
-    video_url_1: clip("ai_elena", "intro", packFor(8).videoUrl),
-    video_url_2: clip("ai_elena", "loop", packFor(9).videoUrl),
-    age: 27,
-    cost_per_minute: 100,
-    country: "Spain",
-    tags: ["music", "premium"],
+    country: "Thailand",
+    tags: ["warm", "chat", "asian"],
     gender: "female",
   },
 ];
@@ -106,15 +133,23 @@ export function resolveAiHostForRequest(requestedId: string): AiHostRecord {
   const direct = getAiHostById(requestedId);
   if (direct) return direct;
 
+  // Legacy ids + discover cards → Asian AI hosts
   const map: Record<string, string> = {
-    c1: "ai_mira",
-    c2: "ai_sofia",
+    ai_mira: "ai_yuna",
+    ai_sofia: "ai_mei",
+    ai_elena: "ai_rin",
+    c1: "ai_yuna",
+    c2: "ai_mei",
     c3: "ai_aya",
-    c4: "ai_lina",
-    c5: "ai_mira",
-    c6: "ai_elena",
+    c4: "ai_hana",
+    c5: "ai_sora",
+    c6: "ai_lina",
+    mira: "ai_yuna",
+    sofia: "ai_mei",
+    aya: "ai_aya",
+    elena: "ai_rin",
   };
-  const mapped = map[requestedId];
+  const mapped = map[requestedId] || map[requestedId.toLowerCase()];
   if (mapped) {
     const row = getAiHostById(mapped);
     if (row) return row;
