@@ -52,14 +52,10 @@ export const NOTIFICATION_TEMPLATES: MessageTemplate[] = [
 ];
 
 export const DURATION_PREVIEWS = [
-  "about 2 min",
-  "2–3 min",
-  "a few minutes",
-  "quick 3 min",
-  "5 min chat",
-  "short & sweet",
-  "just a moment",
-  "~4 min",
+  "30 sec free",
+  "30s preview",
+  "free 30 sec",
+  "30 sec chat",
 ] as const;
 
 export const STATUS_LINES = [
