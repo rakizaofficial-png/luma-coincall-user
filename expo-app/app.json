@@ -35,8 +35,9 @@
     "extra": {
       "lumaWebUrl": "https://luma-user.onrender.com",
       "eas": {
-        "projectId": ""
+        "projectId": "92e302d1-bc1e-4210-aec0-95fbd8e0cea8"
       }
-    }
+    },
+    "owner": "salman112211"
   }
 }
