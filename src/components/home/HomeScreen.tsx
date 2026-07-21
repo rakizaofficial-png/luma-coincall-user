@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Percent, Search, Video, X } from "lucide-react";
+import { Percent, Search, X } from "lucide-react";
 import {
   HostGridCard,
   HostGridSkeleton,
@@ -18,11 +18,7 @@ import {
   mergeDiscoverHosts,
   type DiscoverHost,
 } from "@/lib/discoverHosts";
-import {
-  fetchHomeBanners,
-  type HomeHeroBanner,
-  type PromoSlide,
-} from "@/lib/homeBanners";
+import { fetchHomeBanners, type PromoSlide } from "@/lib/homeBanners";
 import { useApp } from "@/lib/store";
 import { useRouter } from "next/navigation";
 
@@ -42,7 +38,7 @@ export function HomeScreen() {
   const [region, setRegion] = useState<(typeof REGIONS)[number]>("All");
   const [discountOpen, setDiscountOpen] = useState(false);
   const [searchingId, setSearchingId] = useState(false);
-  const [hero, setHero] = useState<HomeHeroBanner | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [promos, setPromos] = useState<PromoSlide[]>([]);
 
   useEffect(() => {
@@ -70,7 +66,6 @@ export function HomeScreen() {
     const loadBanners = async () => {
       const data = await fetchHomeBanners();
       if (cancelled) return;
-      setHero(data.hero);
       setPromos(data.promos || []);
     };
     void loadBanners();
@@ -144,90 +139,74 @@ export function HomeScreen() {
     }
   };
 
-  const heroFrom = hero?.gradientFrom || "#ffb020";
-  const heroTo = hero?.gradientTo || "#ff6b2b";
-  const showHero = Boolean(hero);
-
   return (
     <main className="relative pb-28">
-      <header
-        className="overflow-hidden px-4 pb-3 pt-[max(0.5rem,env(safe-area-inset-top))]"
-        style={
-          showHero
-            ? {
-                background: `linear-gradient(135deg, ${heroFrom}, ${heroTo})`,
-              }
-            : undefined
-        }
-      >
-        <div className="mb-1.5 flex items-center justify-between">
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/50">
-            Luma
-          </p>
+      <header className="sticky top-0 z-30 border-b border-line/50 bg-ink/90 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <span className="rounded-full bg-black/15 px-2.5 py-1 text-[10px] font-bold text-black/80">
+            <button
+              type="button"
+              onClick={() => setSearchOpen((v) => !v)}
+              aria-label="Search"
+              aria-expanded={searchOpen}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line ${
+                searchOpen ? "bg-coral text-white" : "bg-ink-2/80 text-sand"
+              }`}
+            >
+              <Search className="h-4 w-4" />
+            </button>
+            <span className="rounded-full border border-line bg-ink-2/80 px-2.5 py-1.5 text-xs font-bold text-sand">
               {coins} ¢
             </span>
             <ThemeToggle />
             <WalletDiamond compact />
-            <Link
-              href="/call"
-              className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#ff6b1a] text-white shadow"
-              aria-label="Video lobby"
-            >
-              <Video className="h-3.5 w-3.5" />
-            </Link>
           </div>
+          <Link
+            href="/match"
+            className="shrink-0 rounded-full bg-gradient-to-r from-[#ffb020] to-[#ff6b2b] px-3.5 py-2 text-[11px] font-bold text-black shadow"
+          >
+            Tap to Match →
+          </Link>
         </div>
-        {showHero ? (
-          <div className="flex items-end justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <h1 className="font-display text-[1.25rem] font-extrabold leading-tight text-[#2a1600]">
-                {hero?.title || "Meet more friends"}
-              </h1>
-              {hero?.subtitle ? (
-                <p className="mt-0.5 text-[11px] font-medium text-black/55">
-                  {hero.subtitle}
-                </p>
-              ) : null}
-            </div>
-            <Link
-              href={hero?.ctaHref || "/match"}
-              className="shrink-0 rounded-full bg-white/90 px-3.5 py-1.5 text-[11px] font-bold text-[#2a1600] shadow"
+
+        <AnimatePresence initial={false}>
+          {searchOpen ? (
+            <motion.label
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-2 flex items-center gap-2 overflow-hidden rounded-2xl border border-line bg-ink-2/70 px-3 py-2.5"
             >
-              {hero?.ctaLabel || "Match"} →
-            </Link>
-          </div>
-        ) : null}
+              <Search className="h-4 w-4 shrink-0 text-muted" />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void runAppIdSearch();
+                }}
+                placeholder="Search hosts or 6-digit ID…"
+                className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
+              />
+              {/^\d{6}$/.test(query.trim()) ? (
+                <button
+                  type="button"
+                  disabled={searchingId}
+                  onClick={() => void runAppIdSearch()}
+                  className="shrink-0 rounded-lg bg-coral px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-60"
+                >
+                  {searchingId ? "…" : "Go"}
+                </button>
+              ) : null}
+            </motion.label>
+          ) : null}
+        </AnimatePresence>
       </header>
 
       <HomePromoSwipe promos={promos} />
 
-      <div className="sticky top-0 z-30 border-b border-line/50 bg-ink/90 px-4 pb-3 pt-3 backdrop-blur-xl">
-        <label className="flex items-center gap-2 rounded-2xl border border-line bg-ink-2/70 px-3 py-2.5">
-          <Search className="h-4 w-4 shrink-0 text-muted" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void runAppIdSearch();
-            }}
-            placeholder="Search hosts or 6-digit ID…"
-            className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
-          />
-          {/^\d{6}$/.test(query.trim()) ? (
-            <button
-              type="button"
-              disabled={searchingId}
-              onClick={() => void runAppIdSearch()}
-              className="shrink-0 rounded-lg bg-coral px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-60"
-            >
-              {searchingId ? "…" : "Go"}
-            </button>
-          ) : null}
-        </label>
-
-        <div className="mt-3 flex gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="px-4 pt-3">
+        <div className="flex gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {REGIONS.map((r) => (
             <button
               key={r}
@@ -248,31 +227,6 @@ export function HomeScreen() {
                     : r}
             </button>
           ))}
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-1 rounded-2xl border border-line bg-ink-2/60 p-1">
-          <button
-            type="button"
-            onClick={() => setTab("live")}
-            className={`rounded-xl py-2.5 text-center text-xs font-bold transition ${
-              tab === "live"
-                ? "bg-coral text-white"
-                : "text-muted hover:text-sand"
-            }`}
-          >
-            Live
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("call")}
-            className={`rounded-xl py-2.5 text-center text-xs font-bold transition ${
-              tab === "call"
-                ? "bg-[#ff9f1a] text-black"
-                : "text-muted hover:text-sand"
-            }`}
-          >
-            Online
-          </button>
         </div>
       </div>
 
