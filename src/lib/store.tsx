@@ -41,19 +41,28 @@ import {
   type RewardResult,
 } from "@/lib/engagement";
 import {
-  creditCoinsApi,
   fetchOrCreateWallet,
   setPremiumApi,
   spendCoinsApi,
   updateProfileAvatar,
+  updateProfileBio,
   updateProfileName,
+  uploadProfileAvatar,
 } from "@/lib/walletApi";
+import {
+  claimDailyRewardApi,
+  claimReferralRewardApi,
+  claimSpinRewardApi,
+} from "@/lib/rewardsApi";
+import { WELCOME_BONUS_COINS } from "@/lib/engagement/config";
 import {
   ensureLocalProfile,
   updateLocalAvatar,
+  updateLocalBio,
   updateLocalDisplayName,
 } from "@/lib/userProfile";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
+import { pushRecentHost } from "@/lib/autoCallApi";
 
 type Toast = { id: string; text: string };
 
@@ -64,6 +73,7 @@ type AppStore = {
   userId: string;
   displayName: string;
   avatarUrl: string;
+  bio: string;
   coins: number;
   xp: number;
   vipTier: VipTier;
@@ -93,6 +103,11 @@ type AppStore = {
   applyLocalCoins: (balance: number) => void;
   updateDisplayName: (name: string) => Promise<void>;
   updateAvatar: (avatarUrl: string) => Promise<void>;
+  updateBio: (bio: string) => Promise<void>;
+  uploadGalleryAvatar: (
+    dataUrl: string,
+    onProgress?: (pct: number) => void,
+  ) => Promise<void>;
   addXp: (amount: number) => void;
   toggleFollow: (id: string) => void;
   setPremium: (v: boolean) => void;
@@ -119,6 +134,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [userId, setUserId] = useState("");
   const [displayName, setDisplayName] = useState("Luma Fan");
   const [avatarUrl, setAvatarUrl] = useState("");
+  const [bio, setBio] = useState("");
   const [coins, setCoins] = useState(0);
   const [xp, setXp] = useState(0);
   const [isPremium, setPremium] = useState(false);
@@ -166,23 +182,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const syncWallet = useCallback(async () => {
-    const local = ensureLocalProfile();
     const wallet = await fetchOrCreateWallet();
-    // Isolate identity: never adopt another account's name/photo
-    if (wallet.userId && wallet.userId !== local.userId) {
-      setUserId(local.userId);
-      setDisplayName(local.displayName);
-      setAvatarUrl(local.avatarUrl);
-    } else {
-      setUserId(wallet.userId || local.userId);
-      const name =
-        wallet.displayName?.trim() &&
-        wallet.displayName !== "Luma Fan"
-          ? wallet.displayName
-          : local.displayName;
-      setDisplayName(name);
-      setAvatarUrl(wallet.avatarUrl || local.avatarUrl);
-    }
+    const local = ensureLocalProfile();
+    setUserId(wallet.userId || local.userId);
+    const name =
+      wallet.displayName?.trim() && wallet.displayName !== "Luma Fan"
+        ? wallet.displayName
+        : local.displayName;
+    setDisplayName(name);
+    setAvatarUrl(wallet.avatarUrl || local.avatarUrl);
+    setBio(wallet.bio ?? local.bio ?? "");
     setCoins(wallet.coinBalance);
     setXp(wallet.xp);
     setPremium(wallet.isPremium);
@@ -193,32 +202,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setCoins(Math.max(0, Math.floor(balance)));
   }, []);
 
+  /** Local UI only — never mints coins. Server is the only authority. */
   const creditReward = useCallback(
     async (amount: number, label: string) => {
-      if (amount <= 0) return;
-      try {
-        const wallet = await creditCoinsApi({
-          amount,
-          reason: label.toLowerCase().startsWith("reward")
-            ? label
-            : `reward:${label}`,
-        });
-        setCoins(wallet.coinBalance);
-        setXp(wallet.xp);
-        appendLocalHistory(amount, label, "credit");
-        refreshEngagement();
-        triggerCoinBurst(amount);
-        pushToast(label);
-      } catch {
-        pushToast("Reward sync failed — try again");
-        try {
-          await syncWallet();
-        } catch {
-          /* ignore */
-        }
+      if (amount <= 0) {
+        if (label) pushToast(label);
+        return;
       }
+      // Client mint path closed — resync authoritative balance instead.
+      appendLocalHistory(0, `${label} (pending server)`, "credit");
+      pushToast(label);
+      try {
+        await syncWallet();
+      } catch {
+        /* ignore */
+      }
+      refreshEngagement();
     },
-    [pushToast, refreshEngagement, syncWallet, triggerCoinBurst],
+    [pushToast, refreshEngagement, syncWallet],
   );
 
   const updateDisplayName = useCallback(
@@ -251,6 +252,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const wallet = await updateProfileAvatar(nextAvatar);
         setAvatarUrl(wallet.avatarUrl || nextAvatar);
         if (wallet.displayName) setDisplayName(wallet.displayName);
+        if (wallet.bio != null) setBio(wallet.bio);
         getRealtimeClient(wallet.userId || userId, {
           displayName: wallet.displayName || displayName,
           avatarUrl: wallet.avatarUrl || nextAvatar,
@@ -269,6 +271,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [displayName, pushToast, userId],
   );
 
+  const updateBio = useCallback(
+    async (nextBio: string) => {
+      try {
+        const wallet = await updateProfileBio(nextBio);
+        setBio(wallet.bio ?? nextBio);
+        pushToast("Bio updated");
+      } catch {
+        const local = updateLocalBio(nextBio);
+        setBio(local.bio || "");
+        pushToast("Saved on this device");
+      }
+    },
+    [pushToast],
+  );
+
+  const uploadGalleryAvatar = useCallback(
+    async (dataUrl: string, onProgress?: (pct: number) => void) => {
+      const wallet = await uploadProfileAvatar(dataUrl, onProgress);
+      setAvatarUrl(wallet.avatarUrl || "");
+      if (wallet.displayName) setDisplayName(wallet.displayName);
+      if (wallet.bio != null) setBio(wallet.bio);
+      getRealtimeClient(wallet.userId || userId, {
+        displayName: wallet.displayName || displayName,
+        avatarUrl: wallet.avatarUrl || "",
+      });
+      pushToast("Photo saved");
+    },
+    [displayName, pushToast, userId],
+  );
+
   useEffect(() => {
     let cancelled = false;
     let unsub: (() => void) | undefined;
@@ -280,6 +312,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setUserId(local.userId);
         setDisplayName(local.displayName);
         setAvatarUrl(local.avatarUrl);
+        setBio(local.bio || "");
         setEngagement(recordOpenApp());
 
         const wallet = await syncWallet();
@@ -288,7 +321,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setEntranceReady(true);
 
         if (wallet.welcomeBonus) {
-          pushToast("Profile created · +100 welcome coins");
+          pushToast(`Profile created · +${WELCOME_BONUS_COINS} welcome coins`);
         }
 
         const name =
@@ -375,12 +408,55 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const claimCheckIn = useCallback(async () => {
-    return applyReward(claimDailyCheckIn());
-  }, [applyReward]);
+    try {
+      const data = await claimDailyRewardApi();
+      setCoins(data.wallet.coinBalance);
+      setXp(data.wallet.xp);
+      const result = claimDailyCheckIn({
+        coins: data.coins,
+        fromServer: true,
+      });
+      setEngagement(result.state);
+      triggerCoinBurst(data.coins);
+      pushToast(data.reason || result.message);
+      return result;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Daily reward unavailable";
+      pushToast(msg);
+      return {
+        state: getEngagement(),
+        coins: 0,
+        xp: 0,
+        message: msg,
+      };
+    }
+  }, [pushToast, triggerCoinBurst]);
 
   const doLuckySpin = useCallback(async () => {
-    return applyReward(spinLuckyWheel());
-  }, [applyReward]);
+    try {
+      const data = await claimSpinRewardApi();
+      setCoins(data.wallet.coinBalance);
+      setXp(data.wallet.xp);
+      const result = spinLuckyWheel({
+        coins: data.coins,
+        prize: data.prize,
+        fromServer: true,
+      });
+      setEngagement(result.state);
+      triggerCoinBurst(data.coins);
+      pushToast(result.message);
+      return result;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Spin unavailable";
+      pushToast(msg);
+      return {
+        state: getEngagement(),
+        coins: 0,
+        xp: 0,
+        message: msg,
+      };
+    }
+  }, [pushToast, triggerCoinBurst]);
 
   const claimWeeklyMission = useCallback(
     async (id: MissionId) => {
@@ -391,9 +467,41 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const applyReferral = useCallback(
     async (code: string) => {
-      return applyReward(claimReferral(code));
+      try {
+        const data = await claimReferralRewardApi(code);
+        setCoins(data.wallet.coinBalance);
+        setXp(data.wallet.xp);
+        const local = claimReferral(code);
+        setEngagement(local.state);
+        if (data.coins > 0) {
+          triggerCoinBurst(data.coins);
+          pushToast(data.reason || `Referral · +${data.coins}`);
+        } else {
+          pushToast(data.reason || local.message);
+        }
+        return {
+          state: local.state,
+          coins: data.coins,
+          xp: local.xp,
+          message: data.reason || local.message,
+        };
+      } catch (e) {
+        const msg =
+          e instanceof Error ? e.message : "Referral unavailable";
+        // Keep local badge/XP if server referral is disabled
+        if (/disabled/i.test(msg)) {
+          return applyReward(claimReferral(code));
+        }
+        pushToast(msg);
+        return {
+          state: getEngagement(),
+          coins: 0,
+          xp: 0,
+          message: msg,
+        };
+      }
     },
-    [applyReward],
+    [applyReward, pushToast, triggerCoinBurst],
   );
 
   const completeCallEngagement = useCallback(async () => {
@@ -492,10 +600,31 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const toggleFollow = useCallback(
     (id: string) => {
       setFollowing((f) => {
-        const next = f.includes(id) ? f.filter((x) => x !== id) : [...f, id];
-        if (!f.includes(id)) {
-          setEngagement(recordFollow());
-        }
+        const wasFollowing = f.includes(id);
+        const next = wasFollowing ? f.filter((x) => x !== id) : [...f, id];
+        const follow = !wasFollowing;
+        if (follow) setEngagement(recordFollow());
+        if (follow) pushRecentHost(id);
+        void (async () => {
+          try {
+            const { requireApiBase } = await import("@/config/apiConfig");
+            const { getDeviceUserId } = await import("@/lib/walletApi");
+            const me = getDeviceUserId();
+            await fetch(
+              `${requireApiBase()}/hosts/${encodeURIComponent(id)}/follow`,
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-User-Id": me,
+                },
+                body: JSON.stringify({ userId: me, follow }),
+              },
+            );
+          } catch {
+            /* local follow still works offline */
+          }
+        })();
         return next;
       });
     },
@@ -517,9 +646,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         );
         throw e;
       }
-      if (welcomeCoins > 0) {
-        await creditReward(welcomeCoins, `VIP · +${welcomeCoins} welcome coins`);
-      }
+      // VIP coin grants come only from verified IAP / admin — never client mint.
+      void welcomeCoins;
       await applyReward(markVipJoined());
       triggerEntranceBlast();
       pushToast("Welcome to Luma VIP");
@@ -534,6 +662,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       userId,
       displayName,
       avatarUrl,
+      bio,
       coins,
       xp,
       vipTier,
@@ -562,6 +691,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       applyLocalCoins,
       updateDisplayName,
       updateAvatar,
+      updateBio,
+      uploadGalleryAvatar,
       addXp,
       toggleFollow,
       setPremium,
@@ -584,6 +715,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       userId,
       displayName,
       avatarUrl,
+      bio,
       coins,
       xp,
       vipTier,
@@ -612,6 +744,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       applyLocalCoins,
       updateDisplayName,
       updateAvatar,
+      updateBio,
+      uploadGalleryAvatar,
       addXp,
       toggleFollow,
       activatePremium,

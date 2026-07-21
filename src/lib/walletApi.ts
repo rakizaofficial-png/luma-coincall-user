@@ -6,12 +6,15 @@
 
 import { requireApiBase } from "@/config/apiConfig";
 import {
+  adoptRestoredUserId,
   ensureDeviceUserId,
+  ensureInstallId,
   ensureLocalProfile,
   hasWelcomeBonusClaimed,
   isGenericDisplayName,
   markWelcomeBonusClaimed,
   updateLocalAvatar,
+  updateLocalBio,
   updateLocalDisplayName,
 } from "@/lib/userProfile";
 
@@ -22,9 +25,10 @@ export type WalletSnapshot = {
   isPremium: boolean;
   displayName: string;
   avatarUrl?: string;
+  bio?: string;
   appId?: string;
   created?: boolean;
-  /** True only when server actually credited +100 this request */
+  /** True only when server actually credited welcome this request */
   welcomeBonus?: boolean;
 };
 
@@ -43,6 +47,7 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: {
       "Content-Type": "application/json",
       "X-User-Id": deviceUserId(),
+      "X-Install-Id": ensureInstallId(),
       ...(init?.headers || {}),
     },
     cache: "no-store",
@@ -62,20 +67,37 @@ export async function fetchOrCreateWallet(): Promise<WalletSnapshot> {
     wallet: WalletSnapshot;
     created?: boolean;
     welcomeBonus?: boolean;
+    restored?: boolean;
+    restoredUserId?: string;
   }>("/wallet/me", {
     method: "POST",
     body: JSON.stringify({
       userId: local.userId,
       displayName: local.displayName,
       avatarUrl: local.avatarUrl,
+      bio: local.bio || "",
       welcomeAlreadyClaimed: hasWelcomeBonusClaimed(local.userId),
+      installId: ensureInstallId(),
     }),
   });
-  const wallet = data.wallet;
+  let wallet = data.wallet;
   const welcomeBonus = Boolean(data.welcomeBonus);
 
+  if (
+    data.restored &&
+    data.restoredUserId &&
+    data.restoredUserId !== local.userId
+  ) {
+    adoptRestoredUserId(data.restoredUserId, {
+      displayName: wallet.displayName,
+      avatarUrl: wallet.avatarUrl,
+      bio: wallet.bio,
+      appId: wallet.appId,
+    });
+  }
+
   if (welcomeBonus || data.created) {
-    markWelcomeBonusClaimed(local.userId);
+    markWelcomeBonusClaimed(wallet.userId || local.userId);
   }
 
   // Prefer unique local identity over generic server defaults
@@ -92,21 +114,21 @@ export async function fetchOrCreateWallet(): Promise<WalletSnapshot> {
     void api("/wallet/me", {
       method: "POST",
       body: JSON.stringify({
-        userId: local.userId,
+        userId: wallet.userId || local.userId,
         displayName: local.displayName,
         avatarUrl: local.avatarUrl,
+        bio: local.bio || "",
         updateProfile: true,
         welcomeAlreadyClaimed: true,
       }),
     }).catch(() => undefined);
   }
 
-  if (
-    wallet.avatarUrl &&
-    wallet.avatarUrl !== local.avatarUrl &&
-    !isGenericDisplayName(wallet.displayName)
-  ) {
+  if (wallet.avatarUrl && wallet.avatarUrl !== local.avatarUrl) {
     updateLocalAvatar(wallet.avatarUrl);
+  }
+  if (wallet.bio != null && wallet.bio !== (local.bio || "")) {
+    updateLocalBio(wallet.bio);
   }
 
   return {
@@ -115,6 +137,7 @@ export async function fetchOrCreateWallet(): Promise<WalletSnapshot> {
       ? local.displayName
       : wallet.displayName || local.displayName,
     avatarUrl: wallet.avatarUrl || local.avatarUrl,
+    bio: wallet.bio ?? local.bio ?? "",
     created: Boolean(data.created),
     welcomeBonus,
   };
@@ -131,6 +154,7 @@ export async function updateProfileName(
       userId: local.userId,
       displayName: local.displayName,
       avatarUrl: local.avatarUrl,
+      bio: local.bio || "",
       updateProfile: true,
     }),
   });
@@ -148,10 +172,63 @@ export async function updateProfileAvatar(
       userId: local.userId,
       displayName: local.displayName,
       avatarUrl: local.avatarUrl,
+      bio: local.bio || "",
       updateProfile: true,
     }),
   });
   return data.wallet;
+}
+
+/** Update bio on device + server */
+export async function updateProfileBio(bio: string): Promise<WalletSnapshot> {
+  const local = updateLocalBio(bio);
+  const data = await api<{ wallet: WalletSnapshot }>("/wallet/me", {
+    method: "POST",
+    body: JSON.stringify({
+      userId: local.userId,
+      displayName: local.displayName,
+      avatarUrl: local.avatarUrl,
+      bio: local.bio || "",
+      updateProfile: true,
+    }),
+  });
+  return data.wallet;
+}
+
+/**
+ * Upload compressed gallery image → durable API avatar URL + wallet sync.
+ * onProgress: 0–100 (compress + upload).
+ */
+export async function uploadProfileAvatar(
+  dataUrl: string,
+  onProgress?: (pct: number) => void,
+): Promise<WalletSnapshot> {
+  const userId = deviceUserId();
+  onProgress?.(5);
+  const base = requireApiBase();
+  onProgress?.(25);
+  const res = await fetch(
+    `${base}/users/${encodeURIComponent(userId)}/avatar`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-User-Id": userId,
+        "X-Install-Id": ensureInstallId(),
+      },
+      body: JSON.stringify({ image: dataUrl }),
+      cache: "no-store",
+    },
+  );
+  onProgress?.(75);
+  const data = (await res.json()) as { avatarUrl?: string; error?: string };
+  if (!res.ok || !data.avatarUrl) {
+    throw new Error(data.error || `Upload failed (${res.status})`);
+  }
+  onProgress?.(90);
+  const wallet = await updateProfileAvatar(data.avatarUrl);
+  onProgress?.(100);
+  return wallet;
 }
 
 export async function refreshWallet(): Promise<WalletSnapshot> {

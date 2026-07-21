@@ -1,8 +1,7 @@
 import {
   ACHIEVEMENTS,
-  DAILY_CHECKIN_REWARDS,
+  DAILY_LOGIN_COINS,
   MAX_SPINS_PER_DAY,
-  REFERRAL_REWARD,
   SPIN_PRIZES,
   WEEKLY_MISSIONS,
   XP_PER_LEVEL,
@@ -90,10 +89,17 @@ export function persist(state: EngagementState) {
   return state;
 }
 
-export function claimDailyCheckIn(): RewardResult {
+export function claimDailyCheckIn(opts?: {
+  coins?: number;
+  fromServer?: boolean;
+}): RewardResult {
   let state = loadEngagement();
   const today = todayKey();
-  if (state.checkInClaimedToday && state.lastCheckInDay === today) {
+  if (
+    !opts?.fromServer &&
+    state.checkInClaimedToday &&
+    state.lastCheckInDay === today
+  ) {
     return { state, coins: 0, xp: 0, message: "Already claimed today" };
   }
 
@@ -104,8 +110,7 @@ export function claimDailyCheckIn(): RewardResult {
     streak = state.streak;
   }
 
-  const dayIndex = Math.min(streak - 1, DAILY_CHECKIN_REWARDS.length - 1);
-  const coins = DAILY_CHECKIN_REWARDS[dayIndex] ?? 20;
+  const coins = opts?.coins ?? DAILY_LOGIN_COINS;
   const xp = 20 + Math.min(streak, 7) * 5;
 
   state = {
@@ -115,7 +120,7 @@ export function claimDailyCheckIn(): RewardResult {
     checkInClaimedToday: true,
   };
   state = addLevelXp(state, xp);
-  state = pushHistory(state, coins, `Daily check-in · day ${streak}`, "credit");
+  state = pushHistory(state, coins, `Daily login · +${coins}`, "credit");
 
   const achIds: AchievementId[] = [];
   if (streak >= 3) achIds.push("streak_3");
@@ -124,14 +129,16 @@ export function claimDailyCheckIn(): RewardResult {
 
   const unlocked = unlockAchievements(state, achIds);
   state = unlocked.state;
-  const totalCoins = coins + unlocked.coins;
+  // Achievement coins still credited via /wallet/credit separately if needed;
+  // daily amount itself comes from server.
+  const totalCoins = coins;
 
   persist(state);
   return {
     state,
     coins: totalCoins,
     xp,
-    message: `Day ${streak} streak · +${totalCoins} coins`,
+    message: `Daily login · +${totalCoins} coins`,
     unlocked: unlocked.unlocked,
   };
 }
@@ -146,13 +153,22 @@ function pickPrize(): SpinPrize {
   return SPIN_PRIZES[0]!;
 }
 
-export function spinLuckyWheel(): RewardResult {
+/** UI-only preview of wheel segments — server assigns the real prize */
+export function previewSpinPrize(): SpinPrize {
+  return pickPrize();
+}
+
+export function spinLuckyWheel(opts?: {
+  coins?: number;
+  prize?: SpinPrize;
+  fromServer?: boolean;
+}): RewardResult {
   let state = loadEngagement();
   const today = todayKey();
   if (state.lastSpinDay !== today) {
     state = { ...state, lastSpinDay: today, spinsToday: 0 };
   }
-  if (state.spinsToday >= MAX_SPINS_PER_DAY) {
+  if (!opts?.fromServer && state.spinsToday >= MAX_SPINS_PER_DAY) {
     return {
       state,
       coins: 0,
@@ -161,7 +177,16 @@ export function spinLuckyWheel(): RewardResult {
     };
   }
 
-  const prize = pickPrize();
+  const prize =
+    opts?.prize ||
+    ({
+      id: `c${opts?.coins ?? 30}`,
+      label: String(opts?.coins ?? 30),
+      coins: opts?.coins ?? 30,
+      weight: 1,
+      color: "#ffb800",
+    } satisfies SpinPrize);
+
   state = {
     ...state,
     spinsToday: state.spinsToday + 1,
@@ -177,11 +202,10 @@ export function spinLuckyWheel(): RewardResult {
   }
 
   const achIds: AchievementId[] = [];
-  if (coins >= 100) achIds.push("spin_win");
+  if (coins >= 30) achIds.push("spin_win");
   if (state.level >= 5) achIds.push("level_5");
   const unlocked = unlockAchievements(state, achIds);
   state = unlocked.state;
-  coins += unlocked.coins;
 
   persist(state);
   return {
@@ -323,21 +347,20 @@ export function claimReferral(code: string): RewardResult {
   if (state.referralClaims > 0) {
     return { state, coins: 0, xp: 0, message: "Referral already claimed" };
   }
+  // Coins are granted only by POST /api/rewards/referral — never locally.
   state = {
     ...state,
     referralClaims: 1,
   };
   state = addLevelXp(state, 40);
-  state = pushHistory(state, REFERRAL_REWARD, "Referral bonus", "credit");
   const unlocked = unlockAchievements(state, ["referral_1"]);
   state = unlocked.state;
-  const coins = REFERRAL_REWARD + unlocked.coins;
   persist(state);
   return {
     state,
-    coins,
+    coins: 0,
     xp: 40,
-    message: `Welcome bonus · +${coins} coins`,
+    message: "Invite code saved",
     unlocked: unlocked.unlocked,
   };
 }
@@ -370,13 +393,8 @@ export function appendLocalHistory(
   return persist(state);
 }
 
-export function nextCheckInReward(state: EngagementState): number {
-  const today = todayKey();
-  let nextStreak = 1;
-  if (state.lastCheckInDay === yesterdayKey()) nextStreak = state.streak + 1;
-  else if (state.lastCheckInDay === today) nextStreak = state.streak;
-  const idx = Math.min(nextStreak - 1, DAILY_CHECKIN_REWARDS.length - 1);
-  return DAILY_CHECKIN_REWARDS[idx] ?? 20;
+export function nextCheckInReward(_state?: EngagementState): number {
+  return DAILY_LOGIN_COINS;
 }
 
 export function spinsRemaining(state: EngagementState): number {

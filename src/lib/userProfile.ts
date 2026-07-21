@@ -10,6 +10,7 @@ export type UserProfile = {
   userId: string;
   displayName: string;
   avatarUrl: string;
+  bio?: string;
   createdAt: number;
   isNew: boolean;
   appId?: string;
@@ -17,6 +18,7 @@ export type UserProfile = {
 
 const PROFILE_KEY = "luma_user_profile_v1";
 const WELCOME_CLAIMED_KEY = "luma_welcome_claimed_v1";
+const INSTALL_ID_KEY = "luma_install_id_v1";
 
 const ADJECTIVES = [
   "Swift",
@@ -136,6 +138,42 @@ function writeRaw(profile: Omit<UserProfile, "isNew">) {
   localStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
 }
 
+/** Stable install id for reinstall abuse prevention (survives userId rotation when possible). */
+export function ensureInstallId(): string {
+  if (typeof window === "undefined") return "server";
+  try {
+    // Prefer inject from native Expo shell
+    const injected = (window as unknown as { __LUMA_INSTALL_ID__?: string })
+      .__LUMA_INSTALL_ID__;
+    if (injected && typeof injected === "string" && injected.length > 4) {
+      localStorage.setItem(INSTALL_ID_KEY, injected);
+      return injected;
+    }
+    let id = localStorage.getItem(INSTALL_ID_KEY);
+    if (!id) {
+      id = `inst_${crypto.randomUUID()}`;
+      localStorage.setItem(INSTALL_ID_KEY, id);
+      try {
+        // Cookie backup (survives some storage clears in WebView)
+        document.cookie = `${INSTALL_ID_KEY}=${encodeURIComponent(id)};path=/;max-age=31536000;SameSite=Lax`;
+      } catch {
+        /* ignore */
+      }
+    }
+    return id;
+  } catch {
+    try {
+      const m = document.cookie.match(
+        new RegExp(`(?:^|; )${INSTALL_ID_KEY}=([^;]*)`),
+      );
+      if (m?.[1]) return decodeURIComponent(m[1]);
+    } catch {
+      /* ignore */
+    }
+    return `inst_ephemeral_${crypto.randomUUID()}`;
+  }
+}
+
 /** Stable device user id (also mirrored in apiConfig.deviceUserKey) */
 export function ensureDeviceUserId(): string {
   if (typeof window === "undefined") return "server";
@@ -198,6 +236,7 @@ export function ensureLocalProfile(): UserProfile {
         userId,
         displayName,
         avatarUrl,
+        bio: existing.bio || "",
         createdAt: existing.createdAt,
         appId: existing.appId,
       };
@@ -213,7 +252,13 @@ export function ensureLocalProfile(): UserProfile {
       : uniqueDisplayName(userId);
   const avatarUrl = existing?.avatarUrl || uniqueAvatarUrl(userId);
   const createdAt = existing?.createdAt || Date.now();
-  const profile = { userId, displayName, avatarUrl, createdAt };
+  const profile = {
+    userId,
+    displayName,
+    avatarUrl,
+    bio: existing?.bio || "",
+    createdAt,
+  };
   writeRaw(profile);
   return { ...profile, isNew: !existing };
 }
@@ -232,6 +277,7 @@ export function updateLocalDisplayName(displayName: string): UserProfile {
     userId: next.userId,
     displayName: next.displayName,
     avatarUrl: next.avatarUrl,
+    bio: next.bio || "",
     createdAt: next.createdAt,
     appId: next.appId,
   });
@@ -248,10 +294,58 @@ export function updateLocalAvatar(avatarUrl: string): UserProfile {
     userId: next.userId,
     displayName: next.displayName,
     avatarUrl: next.avatarUrl,
+    bio: next.bio || "",
     createdAt: next.createdAt,
     appId: next.appId,
   });
   return { ...next, isNew: false };
+}
+
+export function updateLocalBio(bio: string): UserProfile {
+  const current = ensureLocalProfile();
+  const next = {
+    ...current,
+    bio: bio.trim().slice(0, 280),
+  };
+  writeRaw({
+    userId: next.userId,
+    displayName: next.displayName,
+    avatarUrl: next.avatarUrl,
+    bio: next.bio,
+    createdAt: next.createdAt,
+    appId: next.appId,
+  });
+  return { ...next, isNew: false };
+}
+
+/** Rewrite device user id after server install→user restore (reinstall). */
+export function adoptRestoredUserId(
+  restoredUserId: string,
+  patch?: Partial<Pick<UserProfile, "displayName" | "avatarUrl" | "bio" | "appId">>,
+): UserProfile {
+  const id = String(restoredUserId || "").trim();
+  if (!id) return ensureLocalProfile();
+  const key = apiConfig.deviceUserKey;
+  try {
+    localStorage.setItem(key, id);
+    sessionStorage.setItem(key, id);
+  } catch {
+    /* ignore */
+  }
+  const existing = readRaw();
+  const profile = {
+    userId: id,
+    displayName:
+      patch?.displayName ||
+      existing?.displayName ||
+      uniqueDisplayName(id),
+    avatarUrl: patch?.avatarUrl || existing?.avatarUrl || uniqueAvatarUrl(id),
+    bio: patch?.bio ?? existing?.bio ?? "",
+    createdAt: existing?.createdAt || Date.now(),
+    appId: patch?.appId || existing?.appId,
+  };
+  writeRaw(profile);
+  return { ...profile, isNew: false };
 }
 
 /** Persist that this device already received the one-time welcome bonus */
