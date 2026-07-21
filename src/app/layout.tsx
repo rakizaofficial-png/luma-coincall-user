@@ -6,6 +6,7 @@ import { ToastHost } from "@/components/ToastHost";
 import { DiamondEntranceBlast } from "@/components/DiamondEntranceBlast";
 import { WelcomePushEngine } from "@/components/welcome/WelcomePushEngine";
 import { CoinBurstHost } from "@/components/engagement/CoinBurstHost";
+import { ChatUnreadWatcher } from "@/components/ChatUnreadWatcher";
 import "./globals.css";
 
 const syne = Syne({
@@ -42,6 +43,7 @@ export default function RootLayout({
             <BottomNav />
             <ToastHost />
             <WelcomePushEngine />
+            <ChatUnreadWatcher />
           </div>
         </AppProvider>
       </body>

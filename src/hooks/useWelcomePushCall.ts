@@ -9,7 +9,6 @@ import {
   type WelcomePushPhase,
 } from "@/lib/welcomePush/config";
 import {
-  nextLaunchDelayMs,
   nextRepeatDelayMs,
   nextRingDurationMs,
   pickNextWelcomeCaller,
@@ -28,9 +27,12 @@ import { useApp } from "@/lib/store";
  *   demo → TEASER (30s free preview) → PAYWALL_BOOST
  *      → recharge OR offer expires / dismiss → call cut (IDLE)
  */
+/** Ring shortly after launch/initialization once we know the user is broke. */
+const STARTUP_CALL_DELAY_MS = 1500;
+
 export function useWelcomePushCall(opts: { enabled: boolean }) {
   const router = useRouter();
-  const { coins } = useApp();
+  const { coins, ready } = useApp();
   const coinsRef = useRef(coins);
   coinsRef.current = coins;
 
@@ -85,6 +87,10 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
       return;
     }
     if (phaseRef.current !== "IDLE" && phaseRef.current !== "DONE") return;
+    // STRICT BUSINESS RULE: the automatic welcome / AI-host call fires ONLY
+    // when the user's coins are fully exhausted. If they still hold any
+    // balance (> 0) we NEVER ring — they should be spending, not lured.
+    if (coinsRef.current > 0) return;
     if (pickingRef.current) return;
     pickingRef.current = true;
     try {
@@ -161,7 +167,13 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
     };
   }, [opts.enabled, scheduleNext]);
 
-  // First call after 1–2 min on dashboard + recurring
+  // Auto welcome-call arming.
+  //  • Only arm once the live wallet balance is known (`ready`) so we never
+  //    ring during the pre-sync window when coins default to 0.
+  //  • Strict rule: fire ONLY when coins are exhausted (<= 0). A user with a
+  //    balance has any pending auto-call cancelled.
+  //  • When broke, ring shortly after launch/initialization so the trigger
+  //    fires on app open (same on the mobile WebView as on web).
   useEffect(() => {
     if (!opts.enabled) {
       clearTimers();
@@ -169,12 +181,20 @@ export function useWelcomePushCall(opts: { enabled: boolean }) {
       setPhase("IDLE");
       return;
     }
-    scheduleNext(nextLaunchDelayMs());
+    if (!ready) return;
+    if (coins > 0) {
+      if (repeatTimer.current) {
+        clearTimeout(repeatTimer.current);
+        repeatTimer.current = null;
+      }
+      return;
+    }
+    scheduleNext(STARTUP_CALL_DELAY_MS);
     return () => {
       clearTimers();
       if (repeatTimer.current) clearTimeout(repeatTimer.current);
     };
-  }, [opts.enabled, clearTimers, scheduleNext]);
+  }, [opts.enabled, ready, coins, clearTimers, scheduleNext]);
 
   // Ringtone + auto-dismiss
   useEffect(() => {

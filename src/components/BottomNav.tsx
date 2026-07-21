@@ -2,8 +2,10 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect, useState } from "react";
 import { Home, Radio, Video, MessageCircle, UserRound } from "lucide-react";
 import { motion } from "framer-motion";
+import { getTotalUnread, subscribeUnread } from "@/lib/dmStore";
 
 const tabs = [
   { href: "/", label: "Home", icon: Home },
@@ -15,6 +17,19 @@ const tabs = [
 
 export function BottomNav() {
   const pathname = usePathname();
+  const [unread, setUnread] = useState(0);
+
+  // Reactive chat unread badge — refreshes on send/read/incoming and on
+  // navigation (so the badge clears right after a chat is opened/read).
+  useEffect(() => {
+    const refresh = () => setUnread(getTotalUnread());
+    refresh();
+    return subscribeUnread(refresh);
+  }, []);
+  useEffect(() => {
+    setUnread(getTotalUnread());
+  }, [pathname]);
+
   const hide =
     pathname.startsWith("/live/") ||
     pathname.startsWith("/call/") ||
@@ -23,7 +38,8 @@ export function BottomNav() {
     pathname.startsWith("/messages/") ||
     pathname.startsWith("/party/") ||
     pathname.startsWith("/feed") ||
-    pathname === "/premium";
+    pathname === "/premium" ||
+    pathname === "/support";
 
   if (hide) return null;
 
@@ -53,10 +69,17 @@ export function BottomNav() {
                     transition={{ type: "spring", stiffness: 380, damping: 30 }}
                   />
                 )}
-                <Icon
-                  className={`relative h-5 w-5 ${active ? "text-coral" : "text-muted"}`}
-                  strokeWidth={active ? 2.4 : 1.8}
-                />
+                <span className="relative">
+                  <Icon
+                    className={`h-5 w-5 ${active ? "text-coral" : "text-muted"}`}
+                    strokeWidth={active ? 2.4 : 1.8}
+                  />
+                  {tab.href === "/messages" && unread > 0 ? (
+                    <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral px-1 text-[9px] font-bold leading-none text-white ring-2 ring-ink">
+                      {unread > 9 ? "9+" : unread}
+                    </span>
+                  ) : null}
+                </span>
                 <span
                   className={
                     active ? "relative text-sand" : "relative text-muted"

@@ -17,6 +17,7 @@ import {
   openDmWithHost,
   sendDmMessage,
   syncDmFromApi,
+  threadIdForHost,
   type DmMessage,
 } from "@/lib/dmStore";
 import { fetchLiveHosts } from "@/lib/api";
@@ -87,6 +88,8 @@ export default function ChatThreadPage({
 
       if (cancelled || !hostId) return;
       setHostMeta({ id: hostId, name, image, online });
+      // Viewing this thread clears its unread (covers seed→DM conversions too).
+      markDmRead(threadIdForHost(hostId));
 
       const synced = await syncDmFromApi(hostId);
       if (!cancelled) setMessages(synced);
@@ -96,6 +99,8 @@ export default function ChatThreadPage({
           if (prev.some((m) => m.id === msg.id)) return prev;
           return [...prev, msg];
         });
+        // Message arrived while the thread is open → keep it read.
+        markDmRead(threadIdForHost(hostId));
       });
       poll = setInterval(() => {
         void syncDmFromApi(hostId).then((rows) => {

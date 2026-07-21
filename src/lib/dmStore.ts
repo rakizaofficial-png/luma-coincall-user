@@ -9,6 +9,7 @@ import { requireApiBase } from "@/config/apiConfig";
 import { getDeviceUserId } from "@/lib/walletApi";
 import { getLocalProfile } from "@/lib/userProfile";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
+import { threads as seedThreads } from "@/lib/data";
 
 export type DmMessage = {
   id: string;
@@ -51,6 +52,47 @@ function writeJson(key: string, value: unknown) {
   }
 }
 
+/**
+ * Reactive unread counter. Components (e.g. the bottom-nav Chat badge) can
+ * subscribe and re-read `getTotalUnread()` whenever the count changes.
+ */
+type UnreadListener = () => void;
+const unreadListeners = new Set<UnreadListener>();
+
+export function subscribeUnread(cb: UnreadListener): () => void {
+  unreadListeners.add(cb);
+  return () => {
+    unreadListeners.delete(cb);
+  };
+}
+
+function emitUnread() {
+  for (const cb of unreadListeners) {
+    try {
+      cb();
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Total unread across live DM threads plus seed conversations that the user
+ * hasn't opened yet. Opening a chat marks it read (`markDmRead`) or converts a
+ * seed thread into a DM thread with 0 unread, so the badge only clears after
+ * the specific chat is actually viewed.
+ */
+export function getTotalUnread(): number {
+  const dms = listDmThreads();
+  const dmUnread = dms.reduce((n, t) => n + (t.unread || 0), 0);
+  const openedHostIds = new Set(dms.map((d) => d.hostId));
+  const seedUnread = seedThreads.reduce(
+    (n, t) => n + (openedHostIds.has(t.creatorId) ? 0 : t.unread || 0),
+    0,
+  );
+  return dmUnread + seedUnread;
+}
+
 export function threadIdForHost(hostId: string) {
   return `dm_${hostId}`;
 }
@@ -70,6 +112,7 @@ function cacheThread(t: DmThread) {
   const threads = listDmThreads().filter((x) => x.id !== t.id);
   threads.unshift(t);
   writeJson(THREADS_KEY, threads);
+  emitUnread();
 }
 
 function cacheMessages(threadId: string, messages: DmMessage[]) {
@@ -115,6 +158,7 @@ export function openDmWithHost(input: {
     existing.hostAvatar = input.hostAvatar;
     existing.updatedAt = now;
     writeJson(THREADS_KEY, threads);
+    emitUnread();
   }
 
   return id;
@@ -240,6 +284,7 @@ export function appendDmReply(threadId: string, text: string): DmMessage {
     t.updatedAt = now;
     t.unread = (t.unread || 0) + 1;
     writeJson(THREADS_KEY, threads);
+    emitUnread();
   }
   return reply;
 }
@@ -247,9 +292,66 @@ export function appendDmReply(threadId: string, text: string): DmMessage {
 export function markDmRead(threadId: string) {
   const threads = listDmThreads();
   const t = threads.find((x) => x.id === threadId);
-  if (t) {
+  if (t && t.unread) {
     t.unread = 0;
     writeJson(THREADS_KEY, threads);
+    emitUnread();
+  }
+}
+
+/**
+ * Handle an inbound realtime DM (from a host). Bumps that thread's unread
+ * count so the chat badge lights up even when the user isn't viewing the
+ * thread. The open chat screen re-marks itself read, so only background
+ * threads accumulate unread.
+ */
+export function noteIncomingDm(
+  userId: string,
+  payload:
+    | {
+        message?: {
+          id: string;
+          fromId: string;
+          toId: string;
+          text: string;
+          createdAt: number;
+        };
+        thread?: { hostId?: string; lastMessage?: string };
+      }
+    | undefined,
+): void {
+  const m = payload?.message;
+  if (!m || !m.fromId || m.fromId === userId) return; // only inbound host msgs
+  const hostId = m.fromId;
+  const threadId = threadIdForHost(hostId);
+  const now = m.createdAt || Date.now();
+
+  const threads = listDmThreads();
+  const existing = threads.find((x) => x.id === threadId);
+  if (existing) {
+    existing.lastMessage = m.text || existing.lastMessage;
+    existing.updatedAt = now;
+    existing.unread = (existing.unread || 0) + 1;
+    writeJson(THREADS_KEY, threads);
+    emitUnread();
+  } else {
+    cacheThread({
+      id: threadId,
+      hostId,
+      hostName: "Host",
+      hostAvatar: "",
+      lastMessage: m.text || "New message",
+      updatedAt: now,
+      unread: 1,
+    });
+  }
+
+  const msgs = getDmMessages(threadId);
+  if (!msgs.some((x) => x.id === m.id)) {
+    cacheMessages(threadId, [
+      ...msgs,
+      { id: m.id, from: "them", text: m.text, at: now, fromId: m.fromId },
+    ]);
   }
 }
 

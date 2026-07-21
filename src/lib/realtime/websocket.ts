@@ -140,10 +140,15 @@ export class RealtimeClient {
     });
     if (this.avatarUrl) qs.set("avatar", this.avatarUrl);
     const url = `${apiConfig.wsUrl}?${qs.toString()}`;
+    // Explicit logging so native/mobile handshake failures are debuggable
+    // (visible in Metro / logcat / WebView remote console). This is the #1
+    // clue when calls work on web but the mobile socket never connects.
+    console.log(`[realtime] connecting → ${apiConfig.wsUrl}`);
     const ws = new WebSocket(url);
     this.ws = ws;
 
     ws.onopen = () => {
+      console.log(`[realtime] connected (userId=${this.userId})`);
       this.emit({ type: "connected", payload: { userId: this.userId } });
       ws.send(
         JSON.stringify({
@@ -167,12 +172,24 @@ export class RealtimeClient {
       }
     };
 
-    ws.onclose = () => {
+    ws.onclose = (ev) => {
+      console.warn(
+        `[realtime] closed (code=${ev.code}${ev.reason ? ` reason=${ev.reason}` : ""}) url=${apiConfig.wsUrl}`,
+      );
       this.ws = null;
       if (!this.closedByUser) this.scheduleReconnect();
     };
 
     ws.onerror = () => {
+      // Most common on mobile: unreachable host (localhost vs 10.0.2.2) or
+      // blocked cleartext traffic. Surface the target URL to diagnose. Use
+      // warn (not error) — this is expected/handled and auto-reconnects, so it
+      // shouldn't trip the dev error overlay.
+      console.warn(
+        `[realtime] connect_error — could not reach ${apiConfig.wsUrl}. ` +
+          `On Android emulator the backend must be reachable (e.g. 10.0.2.2), ` +
+          `and cleartext http must be allowed.`,
+      );
       ws.close();
     };
   }
@@ -209,6 +226,7 @@ export class RealtimeClient {
 
   private scheduleReconnect() {
     if (this.reconnectTimer) return;
+    console.log("[realtime] scheduling reconnect in 2.5s…");
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
