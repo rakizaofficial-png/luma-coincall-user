@@ -37,19 +37,6 @@
       ],
       "softwareKeyboardLayoutMode": "resize"
     },
-    "plugins": [
-      "expo-screen-capture",
-      [
-        "expo-build-properties",
-        {
-          "android": {
-            "minSdkVersion": 24,
-            "compileSdkVersion": 35,
-            "targetSdkVersion": 35
-          }
-        }
-      ]
-    ],
     "extra": {
       "lumaWebUrl": "https://luma-user.onrender.com",
       "eas": {

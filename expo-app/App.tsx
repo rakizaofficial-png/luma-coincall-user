@@ -10,7 +10,6 @@ import {
   View,
 } from "react-native";
 import { WebView } from "react-native-webview";
-import Constants from "expo-constants";
 import * as ScreenCapture from "expo-screen-capture";
 
 /**
@@ -20,10 +19,7 @@ import * as ScreenCapture from "expo-screen-capture";
  *   eas build --platform android --profile preview
  */
 const LUMA_URL =
-  process.env.EXPO_PUBLIC_LUMA_WEB_URL ||
-  (Constants.expoConfig?.extra as { lumaWebUrl?: string } | undefined)
-    ?.lumaWebUrl ||
-  "https://luma-user.onrender.com";
+  process.env.EXPO_PUBLIC_LUMA_WEB_URL || "https://luma-user.onrender.com";
 
 type BoundaryState = { error: Error | null };
 
