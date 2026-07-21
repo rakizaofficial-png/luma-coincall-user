@@ -8,6 +8,7 @@ import {
   Crown,
   Flame,
   History,
+  LifeBuoy,
   Pencil,
   Phone,
   RefreshCw,
@@ -377,6 +378,21 @@ export default function ProfilePage() {
               </span>
               <span className="text-[11px] text-muted">
                 Badges · referral · weekly goals
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted" />
+          </Link>
+          <Link
+            href="/support"
+            className="flex items-center gap-3 rounded-2xl border border-cyan/25 bg-cyan/5 px-3.5 py-3.5"
+          >
+            <LifeBuoy className="h-5 w-5 shrink-0 text-cyan" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-display text-sm font-bold">
+                Help &amp; Support
+              </span>
+              <span className="text-[11px] text-muted">
+                Recharge issues · report a problem · contact admin
               </span>
             </span>
             <ChevronRight className="h-4 w-4 text-muted" />
