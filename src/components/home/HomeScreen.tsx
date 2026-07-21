@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { Percent, Search, X } from "lucide-react";
@@ -40,6 +40,18 @@ export function HomeScreen() {
   const [searchingId, setSearchingId] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [promos, setPromos] = useState<PromoSlide[]>([]);
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerH, setHeaderH] = useState(0);
+
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const measure = () => setHeaderH(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -141,7 +153,10 @@ export function HomeScreen() {
 
   return (
     <main className="relative pb-28">
-      <header className="sticky top-0 z-30 border-b border-line/50 bg-ink/90 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl">
+      <header
+        ref={headerRef}
+        className="fixed left-1/2 top-0 z-40 w-full max-w-[430px] -translate-x-1/2 border-b border-line/50 bg-ink/90 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl"
+      >
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <button
@@ -202,6 +217,8 @@ export function HomeScreen() {
           ) : null}
         </AnimatePresence>
       </header>
+
+      <div aria-hidden style={{ height: headerH }} />
 
       <HomePromoSwipe promos={promos} />
 
