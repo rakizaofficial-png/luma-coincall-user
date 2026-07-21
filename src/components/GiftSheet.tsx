@@ -8,6 +8,7 @@ import { useApp } from "@/lib/store";
 import { getDeviceUserId } from "@/lib/walletApi";
 import { requireApiBase } from "@/config/apiConfig";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
+import { playGiftChime } from "@/lib/liveGiftSound";
 
 function isCinematic(g: Gift) {
   return g.tier === "cinematic" || g.coins >= 250;
@@ -83,6 +84,7 @@ export function GiftSheet({
         return;
       }
 
+      playGiftChime(g.coins);
       onSent?.(g.emoji, g);
       if (isCinematic(g)) {
         setCinematic(g);
