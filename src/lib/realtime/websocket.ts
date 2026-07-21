@@ -182,8 +182,10 @@ export class RealtimeClient {
 
     ws.onerror = () => {
       // Most common on mobile: unreachable host (localhost vs 10.0.2.2) or
-      // blocked cleartext traffic. Surface the target URL to diagnose.
-      console.error(
+      // blocked cleartext traffic. Surface the target URL to diagnose. Use
+      // warn (not error) — this is expected/handled and auto-reconnects, so it
+      // shouldn't trip the dev error overlay.
+      console.warn(
         `[realtime] connect_error — could not reach ${apiConfig.wsUrl}. ` +
           `On Android emulator the backend must be reachable (e.g. 10.0.2.2), ` +
           `and cleartext http must be allowed.`,

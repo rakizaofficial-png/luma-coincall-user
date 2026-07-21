@@ -159,8 +159,11 @@ export function HomeScreen() {
   // Auto-rotation: bump a seed on a timer and whenever the tab becomes visible
   // so the discovery feed never looks static — profiles reshuffle over time
   // and on every return to the screen.
-  const [rotationSeed, setRotationSeed] = useState(() => Math.floor(Date.now() / 1000));
+  // Start from a fixed seed so SSR and the first client render match (no
+  // hydration mismatch); randomize + start rotating only after mount.
+  const [rotationSeed, setRotationSeed] = useState(0);
   useEffect(() => {
+    setRotationSeed(Math.floor(Date.now() / 1000));
     const t = setInterval(() => setRotationSeed((s) => s + 1), 15000);
     const onVis = () => {
       if (!document.hidden) setRotationSeed((s) => s + 1);

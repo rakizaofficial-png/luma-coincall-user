@@ -39,11 +39,11 @@ export default function CallLobbyPage() {
     return () => clearInterval(t);
   }, [refresh]);
 
-  // Auto-rotate the calling feed so it never looks static.
-  const [rotationSeed, setRotationSeed] = useState(() =>
-    Math.floor(Date.now() / 1000),
-  );
+  // Auto-rotate the calling feed so it never looks static. Start from a fixed
+  // seed (SSR-safe, no hydration mismatch); randomize + rotate after mount.
+  const [rotationSeed, setRotationSeed] = useState(0);
   useEffect(() => {
+    setRotationSeed(Math.floor(Date.now() / 1000));
     const t = setInterval(() => setRotationSeed((s) => s + 1), 15000);
     const onVis = () => {
       if (!document.hidden) setRotationSeed((s) => s + 1);
