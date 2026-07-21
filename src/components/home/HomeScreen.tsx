@@ -42,6 +42,8 @@ export function HomeScreen() {
   const [promos, setPromos] = useState<PromoSlide[]>([]);
   const headerRef = useRef<HTMLElement>(null);
   const [headerH, setHeaderH] = useState(0);
+  const hostSigRef = useRef<string>("");
+  const promoSigRef = useRef<string>("");
 
   useEffect(() => {
     const el = headerRef.current;
@@ -55,12 +57,31 @@ export function HomeScreen() {
 
   useEffect(() => {
     let cancelled = false;
+
+    // Only commit a new host list when it actually changed, so the 8s poll
+    // doesn't force a redundant re-render (and flicker) on unchanged data.
+    const applyHosts = (next: DiscoverHost[]) => {
+      const sig = next
+        .map((h) => `${h.id}:${h.online ? 1 : 0}${h.live ? 1 : 0}${h.onCall ? 1 : 0}`)
+        .join("|");
+      if (sig === hostSigRef.current) return;
+      hostSigRef.current = sig;
+      setHosts(next);
+    };
+
+    // A cold/unreachable backend fetch can hang with no timeout, leaving the
+    // skeleton loader spinning indefinitely. Clear the initial loading state
+    // after a short grace period so we fall back to the empty/list UI fast.
+    const loadingGuard = setTimeout(() => {
+      if (!cancelled) setLoading(false);
+    }, 3500);
+
     const load = async () => {
       try {
         const live = await fetchLiveHosts();
-        if (!cancelled) setHosts(mergeDiscoverHosts(live));
+        if (!cancelled) applyHosts(mergeDiscoverHosts(live));
       } catch {
-        if (!cancelled) setHosts(mergeDiscoverHosts([]));
+        if (!cancelled) applyHosts(mergeDiscoverHosts([]));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -69,6 +90,7 @@ export function HomeScreen() {
     const timer = setInterval(() => void load(), 8_000);
     return () => {
       cancelled = true;
+      clearTimeout(loadingGuard);
       clearInterval(timer);
     };
   }, []);
@@ -78,7 +100,11 @@ export function HomeScreen() {
     const loadBanners = async () => {
       const data = await fetchHomeBanners();
       if (cancelled) return;
-      setPromos(data.promos || []);
+      const next = data.promos || [];
+      const sig = next.map((p) => p.id).join("|");
+      if (sig === promoSigRef.current) return;
+      promoSigRef.current = sig;
+      setPromos(next);
     };
     void loadBanners();
     const t = setInterval(() => void loadBanners(), 30_000);
