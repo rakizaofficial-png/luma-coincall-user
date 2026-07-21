@@ -335,6 +335,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
         rt.connect();
         unsub = rt.subscribe((ev) => {
+          // Global incoming-call listener registered at the app root so the
+          // mobile app actively listens for call triggers just like web.
+          if (ev.type === "call:incoming" || ev.type === "call:update") {
+            console.log(`[realtime] ${ev.type}`, ev.payload);
+          }
           if (
             ev.type === "wallet:updated" &&
             ev.payload.userId === local.userId

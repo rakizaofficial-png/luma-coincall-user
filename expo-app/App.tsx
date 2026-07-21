@@ -24,8 +24,28 @@ import { WebView } from "react-native-webview";
  * Fail-safe Expo shell — loads Luma web app in a WebView.
  * NO native FLAG_SECURE / ScreenCapture (those caused Android force-closes).
  */
-const LUMA_URL =
+const RAW_LUMA_URL =
   process.env.EXPO_PUBLIC_LUMA_WEB_URL || "https://luma-user.onrender.com";
+
+/**
+ * On the Android emulator, `localhost` / `127.0.0.1` point at the emulator
+ * itself, not the developer's machine — so a dev URL like
+ * `http://localhost:3000` never reaches the local server and calls/sockets
+ * silently fail. `10.0.2.2` is the emulator's special alias for the host
+ * machine's loopback, so rewrite to it. (iOS simulators share the host
+ * network, so `localhost` already works there.)
+ */
+function resolveLumaUrl(raw: string): string {
+  if (Platform.OS === "android") {
+    return raw.replace(
+      /(https?:\/\/)(localhost|127\.0\.0\.1)(?=[:/]|$)/i,
+      "$110.0.2.2",
+    );
+  }
+  return raw;
+}
+
+const LUMA_URL = resolveLumaUrl(RAW_LUMA_URL);
 
 const TRANSIENT_HTTP = new Set([502, 503, 504]);
 const MAX_AUTO_RETRIES = 4;
