@@ -44,8 +44,8 @@ export function BottomNav() {
   if (hide) return null;
 
   return (
-    <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-[430px] -translate-x-1/2 border-t border-line bg-ink/90 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
-      <ul className="grid grid-cols-5 gap-1 py-2">
+    <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-[430px] -translate-x-1/2 border-t border-white/10 bg-[#0b0b0f]/96 px-1.5 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
+      <ul className="grid grid-cols-5 gap-0.5 py-1.5">
         {tabs.map((tab) => {
           const active =
             tab.href === "/"
@@ -60,12 +60,14 @@ export function BottomNav() {
             <li key={tab.href}>
               <Link
                 href={tab.href}
-                className="relative flex flex-col items-center gap-1 rounded-2xl px-1 py-2 text-[10px] font-medium"
+                className="relative flex flex-col items-center gap-0.5 rounded-2xl px-1 py-1.5 text-[10px] font-medium"
               >
                 {active && (
                   <motion.span
                     layoutId="nav-glow"
-                    className="absolute inset-0 rounded-2xl bg-coral/15"
+                    className={`absolute inset-0 rounded-2xl ${
+                      tab.href === "/live" ? "bg-coral/20" : "bg-coral/15"
+                    }`}
                     transition={{ type: "spring", stiffness: 380, damping: 30 }}
                   />
                 )}
@@ -75,7 +77,7 @@ export function BottomNav() {
                     strokeWidth={active ? 2.4 : 1.8}
                   />
                   {tab.href === "/messages" && unread > 0 ? (
-                    <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral px-1 text-[9px] font-bold leading-none text-white ring-2 ring-ink">
+                    <span className="absolute -right-2 -top-1.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-coral px-1 text-[9px] font-bold leading-none text-white ring-2 ring-[#0b0b0f]">
                       {unread > 9 ? "9+" : unread}
                     </span>
                   ) : null}
