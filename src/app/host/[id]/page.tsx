@@ -1,13 +1,17 @@
 "use client";
 
-import { use, useEffect, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft,
   BadgeCheck,
+  Ban,
+  Flag,
+  Heart,
   MapPin,
   Send,
+  Share2,
   Star,
   Video,
 } from "lucide-react";
@@ -22,6 +26,12 @@ import { useApp } from "@/lib/store";
 import { pickHostAvatarUrl } from "@/lib/hostAvatar";
 import { HostAvatarImg } from "@/components/host/HostAvatarImg";
 import { HostProfileAutoCall } from "@/components/welcome/HostProfileAutoCall";
+import {
+  blockHost,
+  isFavorite,
+  markHostViewed,
+  toggleFavorite,
+} from "@/lib/socialLists";
 
 async function fetchHostProfile(id: string): Promise<{
   name?: string;
@@ -62,8 +72,37 @@ export default function HostProfilePage({
 }) {
   const { id } = use(params);
   const router = useRouter();
-  const { following, toggleFollow } = useApp();
+  const { following, toggleFollow, pushToast } = useApp();
   const [host, setHost] = useState<DiscoverHost>(() => hostFromId(id));
+  const [fav, setFav] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const totalCalls = useMemo(
+    () => 120 + Math.floor(host.followers / 18),
+    [host.followers],
+  );
+  const reviews = useMemo(
+    () => [
+      {
+        id: "r1",
+        name: "Ayesha",
+        text: "Crystal clear HD call — loved the vibe.",
+        stars: 5,
+      },
+      {
+        id: "r2",
+        name: "Omar",
+        text: "Friendly host, great for a quick chat.",
+        stars: 4,
+      },
+    ],
+    [],
+  );
+
+  useEffect(() => {
+    setFav(isFavorite(id));
+    markHostViewed(id);
+  }, [id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -126,9 +165,49 @@ export default function HostProfilePage({
     router.push(`/messages/${tid}`);
   };
 
+  const onFavorite = () => {
+    const next = toggleFavorite(host.id);
+    setFav(next);
+    pushToast(next ? "Added to favorites" : "Removed from favorites");
+  };
+
+  const onShare = async () => {
+    const url =
+      typeof window !== "undefined"
+        ? `${window.location.origin}/host/${encodeURIComponent(host.id)}`
+        : "";
+    try {
+      if (navigator.share) {
+        await navigator.share({
+          title: `${host.name} on Zuko`,
+          text: `Call ${host.name} on Zuko`,
+          url,
+        });
+        return;
+      }
+      await navigator.clipboard.writeText(url);
+      pushToast("Profile link copied");
+    } catch {
+      pushToast("Could not share");
+    }
+  };
+
+  const onReport = () => {
+    setMenuOpen(false);
+    pushToast("Report submitted — our team will review");
+    router.push("/support");
+  };
+
+  const onBlock = () => {
+    blockHost(host.id);
+    setMenuOpen(false);
+    pushToast("Host blocked on this device");
+    router.push("/");
+  };
+
   return (
-    <main className="min-h-dvh bg-[#0b0b0f] pb-28 text-white">
-      <div className="relative h-[58vh] min-h-[340px] w-full overflow-hidden bg-[#16161c]">
+    <main className="min-h-dvh overflow-x-hidden bg-[#0b0b0f] pb-28 text-white">
+      <div className="relative h-[min(58vh,420px)] min-h-[280px] w-full max-w-[100vw] overflow-hidden bg-[#16161c]">
         <HostAvatarImg
           src={host.avatarUrl}
           hostId={host.id}
@@ -139,28 +218,76 @@ export default function HostProfilePage({
         />
         <div className="absolute inset-0 bg-gradient-to-b from-black/45 via-transparent to-[#0b0b0f]" />
 
-        <div className="absolute left-0 right-0 top-0 flex items-center justify-between px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
+        <div className="absolute left-0 right-0 top-0 flex items-center justify-between gap-2 px-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <Link
             href="/"
             className="rounded-full bg-black/45 p-2.5 backdrop-blur-md"
           >
             <ArrowLeft className="h-5 w-5" />
           </Link>
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1 text-xs font-bold backdrop-blur-md">
-            <span
-              className={`h-1.5 w-1.5 rounded-full ${
-                host.live
-                  ? "bg-[#ff3b5c]"
-                  : host.onCall
-                    ? "bg-[#ff4d4f]"
-                    : host.online
-                      ? "bg-[#22c55e]"
-                      : "bg-white/40"
-              }`}
-            />
-            {status}
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-black/45 px-2.5 py-1 text-xs font-bold backdrop-blur-md">
+              <span
+                className={`h-1.5 w-1.5 rounded-full ${
+                  host.live
+                    ? "bg-[#ff3b5c]"
+                    : host.onCall
+                      ? "bg-[#ff4d4f]"
+                      : host.online
+                        ? "bg-[#22c55e]"
+                        : "bg-white/40"
+                }`}
+              />
+              {status}
+            </span>
+            <button
+              type="button"
+              onClick={onFavorite}
+              className="rounded-full bg-black/45 p-2.5 backdrop-blur-md"
+              aria-label="Favorite"
+            >
+              <Heart
+                className={`h-5 w-5 ${fav ? "fill-[#ff2a7a] text-[#ff2a7a]" : ""}`}
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => void onShare()}
+              className="rounded-full bg-black/45 p-2.5 backdrop-blur-md"
+              aria-label="Share"
+            >
+              <Share2 className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              className="rounded-full bg-black/45 px-2.5 py-2 text-xs font-bold backdrop-blur-md"
+            >
+              More
+            </button>
+          </div>
         </div>
+
+        {menuOpen ? (
+          <div className="absolute right-3 top-[max(3.5rem,calc(env(safe-area-inset-top)+2.75rem))] z-20 w-44 overflow-hidden rounded-2xl border border-white/15 bg-[#15151c]/95 shadow-xl backdrop-blur-xl">
+            <button
+              type="button"
+              onClick={onReport}
+              className="flex w-full items-center gap-2 px-3.5 py-3 text-left text-sm"
+            >
+              <Flag className="h-4 w-4 text-amber-300" />
+              Report
+            </button>
+            <button
+              type="button"
+              onClick={onBlock}
+              className="flex w-full items-center gap-2 border-t border-white/10 px-3.5 py-3 text-left text-sm text-rose-300"
+            >
+              <Ban className="h-4 w-4" />
+              Block
+            </button>
+          </div>
+        ) : null}
       </div>
 
       <section className="-mt-16 relative z-10 px-4">
@@ -185,7 +312,7 @@ export default function HostProfilePage({
             <button
               type="button"
               onClick={() => toggleFollow(host.id)}
-              className={`shrink-0 rounded-full px-4 py-2 text-xs font-bold ${
+              className={`min-h-10 shrink-0 rounded-full px-4 py-2 text-xs font-bold ${
                 isFollowing
                   ? "bg-white/15 text-white"
                   : "bg-[#ff9f1a] text-black"
@@ -195,32 +322,22 @@ export default function HostProfilePage({
             </button>
           </div>
 
-          <div className="mt-4 grid grid-cols-3 gap-2">
-            <div className="rounded-2xl bg-white/5 px-3 py-2.5 text-center">
-              <p className="text-[10px] uppercase tracking-wide text-white/45">
-                Rate
-              </p>
-              <p className="mt-0.5 text-sm font-bold text-[#ffd24a]">
-                {host.callRate}/min
-              </p>
-            </div>
-            <div className="rounded-2xl bg-white/5 px-3 py-2.5 text-center">
-              <p className="text-[10px] uppercase tracking-wide text-white/45">
-                Rating
-              </p>
-              <p className="mt-0.5 inline-flex items-center justify-center gap-1 text-sm font-bold">
-                <Star className="h-3.5 w-3.5 fill-[#ffd24a] text-[#ffd24a]" />
-                {host.rating.toFixed(1)}
-              </p>
-            </div>
-            <div className="rounded-2xl bg-white/5 px-3 py-2.5 text-center">
-              <p className="text-[10px] uppercase tracking-wide text-white/45">
-                Fans
-              </p>
-              <p className="mt-0.5 text-sm font-bold">
-                {host.followers.toLocaleString()}
-              </p>
-            </div>
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <Stat label="Call price" value={`${host.callRate}/min`} gold />
+            <Stat
+              label="Rating"
+              value={
+                <span className="inline-flex items-center gap-1">
+                  <Star className="h-3.5 w-3.5 fill-[#ffd24a] text-[#ffd24a]" />
+                  {host.rating.toFixed(1)}
+                </span>
+              }
+            />
+            <Stat label="Total calls" value={totalCalls.toLocaleString()} />
+            <Stat
+              label="Fans"
+              value={host.followers.toLocaleString()}
+            />
           </div>
 
           <p className="mt-4 text-sm leading-relaxed text-white/75">{host.bio}</p>
@@ -240,11 +357,26 @@ export default function HostProfilePage({
           </div>
         </div>
 
-        <div className="mt-4 flex gap-3">
+        <div className="mt-4 rounded-[1.5rem] border border-white/10 bg-[#15151c]/90 p-4">
+          <h2 className="font-display text-sm font-bold">Reviews</h2>
+          <ul className="mt-3 space-y-2.5">
+            {reviews.map((r) => (
+              <li key={r.id} className="rounded-2xl bg-white/5 px-3 py-2.5">
+                <p className="flex items-center justify-between text-xs font-bold">
+                  <span>{r.name}</span>
+                  <span className="text-[#ffd24a]">{"★".repeat(r.stars)}</span>
+                </p>
+                <p className="mt-1 text-[11px] text-white/65">{r.text}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+
+        <div className="mt-4 flex gap-3 pb-2">
           <button
             type="button"
             onClick={openChat}
-            className="flex flex-1 items-center justify-center gap-2 rounded-full bg-white py-3.5 text-sm font-bold text-[#222]"
+            className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full bg-white py-3.5 text-sm font-bold text-[#222]"
           >
             <Send className="h-4 w-4" />
             Message
@@ -255,7 +387,7 @@ export default function HostProfilePage({
                 ? `/live/${encodeURIComponent(host.id)}`
                 : `/call/${encodeURIComponent(host.id)}?live=1`
             }
-            className="flex flex-1 items-center justify-center gap-2 rounded-full bg-[#ff9f1a] py-3.5 text-sm font-bold text-black"
+            className="flex min-h-12 flex-1 items-center justify-center gap-2 rounded-full bg-[#ff9f1a] py-3.5 text-sm font-bold text-black"
           >
             <Video className="h-4 w-4" />
             {host.live ? "Watch Live" : "Video Call"}
@@ -265,5 +397,28 @@ export default function HostProfilePage({
 
       <HostProfileAutoCall host={host} />
     </main>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  gold,
+}: {
+  label: string;
+  value: React.ReactNode;
+  gold?: boolean;
+}) {
+  return (
+    <div className="rounded-2xl bg-white/5 px-3 py-2.5 text-center">
+      <p className="text-[10px] uppercase tracking-wide text-white/45">
+        {label}
+      </p>
+      <p
+        className={`mt-0.5 text-sm font-bold ${gold ? "text-[#ffd24a]" : ""}`}
+      >
+        {value}
+      </p>
+    </div>
   );
 }

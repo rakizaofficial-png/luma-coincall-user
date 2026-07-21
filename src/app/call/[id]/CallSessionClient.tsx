@@ -11,6 +11,8 @@ import {
   Signal,
   Sparkles,
   SwitchCamera,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { HostAvatarImg } from "@/components/host/HostAvatarImg";
 import { CoinDeductFlash } from "@/components/call/CoinDeductFlash";
@@ -69,6 +71,10 @@ export default function CallSessionClient({
   const [trialMode, setTrialMode] = useState(false);
   const [secs, setSecs] = useState(0);
   const [muted, setMuted] = useState(false);
+  const [speakerOn, setSpeakerOn] = useState(true);
+  const [netQuality, setNetQuality] = useState<"Excellent" | "Good" | "Fair" | "Low">(
+    "Good",
+  );
   const [giftOpen, setGiftOpen] = useState(false);
   const [beautyOn, setBeautyOn] = useState(true);
   const [trialPaywall, setTrialPaywall] = useState(false);
@@ -101,6 +107,41 @@ export default function CallSessionClient({
       pushToastRef.current("Free 30s trial started");
     }
   }, [trialParam, freeTrialAvailable, useFreeTrial]);
+
+  useEffect(() => {
+    const readNet = () => {
+      const conn = (
+        navigator as Navigator & {
+          connection?: { effectiveType?: string; downlink?: number };
+        }
+      ).connection;
+      const type = conn?.effectiveType || "";
+      const down = conn?.downlink ?? 0;
+      if (type === "slow-2g" || type === "2g" || (down > 0 && down < 0.8)) {
+        setNetQuality("Low");
+      } else if (type === "3g" || (down > 0 && down < 2)) {
+        setNetQuality("Fair");
+      } else if (type === "4g" || down >= 5) {
+        setNetQuality("Excellent");
+      } else {
+        setNetQuality("Good");
+      }
+    };
+    readNet();
+    const t = setInterval(readNet, 4000);
+    return () => clearInterval(t);
+  }, []);
+
+  const lowNetWarnedRef = useRef(false);
+  useEffect(() => {
+    if (netQuality === "Low" && !lowNetWarnedRef.current) {
+      lowNetWarnedRef.current = true;
+      pushToastRef.current("Low network — video quality may drop");
+    }
+    if (netQuality === "Excellent" || netQuality === "Good") {
+      lowNetWarnedRef.current = false;
+    }
+  }, [netQuality]);
 
   const engine = useCallSessionEngine({
     hostId: id,
@@ -554,8 +595,26 @@ export default function CallSessionClient({
               </span>
             </div>
             <div className="flex items-center gap-1 rounded-full border border-white/15 bg-white/10 px-2 py-1 backdrop-blur-xl">
-              <Signal className="h-3 w-3 text-cyan-300" />
-              <span className="text-[10px] font-bold text-cyan-200">Good</span>
+              <Signal
+                className={`h-3 w-3 ${
+                  netQuality === "Low"
+                    ? "text-rose-300"
+                    : netQuality === "Fair"
+                      ? "text-amber-300"
+                      : "text-cyan-300"
+                }`}
+              />
+              <span
+                className={`text-[10px] font-bold ${
+                  netQuality === "Low"
+                    ? "text-rose-200"
+                    : netQuality === "Fair"
+                      ? "text-amber-200"
+                      : "text-cyan-200"
+                }`}
+              >
+                {netQuality}
+              </span>
             </div>
             <div className="rounded-full border border-amber-300/25 bg-amber-400/15 px-2.5 py-1 backdrop-blur-xl">
               <span className="text-[10px] font-bold text-amber-100 drop-shadow">
@@ -568,16 +627,16 @@ export default function CallSessionClient({
         </div>
       </header>
 
-      {/* Glow PiP */}
+      {/* Glow PiP — clamped inside viewport for all phone sizes */}
       <motion.div
         initial={{ opacity: 0, scale: 0.92 }}
         animate={{ opacity: 1, scale: 1 }}
-        className="absolute right-3 top-[max(5.5rem,calc(env(safe-area-inset-top)+4.5rem))] z-20 h-[148px] w-[108px] overflow-hidden rounded-[22px] border border-white/35 bg-black/40 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_12px_40px_rgba(0,0,0,0.45),0_0_28px_rgba(255,77,122,0.25)]"
+        className="absolute right-3 top-[max(5.5rem,calc(env(safe-area-inset-top)+4.5rem))] z-20 h-[min(148px,22vh)] w-[min(108px,28vw)] max-h-[160px] max-w-[120px] overflow-hidden rounded-[22px] border border-white/35 bg-black/40 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_12px_40px_rgba(0,0,0,0.45),0_0_28px_rgba(255,77,122,0.25)]"
       >
         <div
           ref={localRef}
           id="agora-local"
-          className="h-full w-full bg-gradient-to-br from-zinc-800 to-rose-900/40 [&_video]:h-full [&_video]:w-full [&_video]:object-cover"
+          className="h-full w-full max-h-full max-w-full overflow-hidden bg-gradient-to-br from-zinc-800 to-rose-900/40 [&_video]:h-full [&_video]:w-full [&_video]:object-cover"
         />
         <span className="pointer-events-none absolute bottom-1.5 left-1.5 rounded-full bg-black/45 px-1.5 py-0.5 text-[9px] font-bold text-white/90 backdrop-blur">
           You
@@ -612,8 +671,8 @@ export default function CallSessionClient({
         <div ref={feedEndRef} />
       </div>
 
-      {/* Floating circular actions — bottom right */}
-      <div className="pointer-events-auto absolute bottom-[max(1.1rem,env(safe-area-inset-bottom))] right-3 z-30 flex flex-col items-center gap-3">
+      {/* Floating circular actions — thumb-reachable, never off-screen */}
+      <div className="pointer-events-auto absolute bottom-[max(1.1rem,env(safe-area-inset-bottom))] right-3 z-30 flex max-h-[55vh] flex-col items-center gap-2.5 overflow-y-auto">
         <button
           type="button"
           onClick={() => {
@@ -627,6 +686,24 @@ export default function CallSessionClient({
           aria-label={muted ? "Unmute" : "Mute"}
         >
           {muted ? <MicOff className="h-5 w-5" /> : <Mic className="h-5 w-5" />}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setSpeakerOn((v) => {
+              const next = !v;
+              pushToast(next ? "Speaker on" : "Earpiece");
+              return next;
+            });
+          }}
+          className={`${fab} ${speakerOn ? "" : "opacity-70"}`}
+          aria-label={speakerOn ? "Speaker on" : "Speaker off"}
+        >
+          {speakerOn ? (
+            <Volume2 className="h-5 w-5" />
+          ) : (
+            <VolumeX className="h-5 w-5" />
+          )}
         </button>
         <button
           type="button"

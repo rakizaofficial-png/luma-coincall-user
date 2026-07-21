@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Percent, Search, X } from "lucide-react";
+import { Percent, RefreshCw, Search, X } from "lucide-react";
 import {
   HostGridCard,
   HostGridSkeleton,
@@ -18,6 +18,7 @@ import {
   filterHosts,
   mergeDiscoverHosts,
   rotateHosts,
+  sectionHosts,
   type DiscoverHost,
 } from "@/lib/discoverHosts";
 import { fetchHomeBanners, type PromoSlide } from "@/lib/homeBanners";
@@ -28,6 +29,15 @@ type Tab = "live" | "call";
 
 const DISCOUNT_KEY = "luma_home_discount_dismissed";
 const REGIONS = ["All", "Pakistan", "Philippines", "Brazil", "Vietnam", "India"] as const;
+const CATEGORIES = [
+  "All",
+  "Trending",
+  "New",
+  "Top Rated",
+  "Nearby",
+  "Party",
+  "Chill",
+] as const;
 
 /** Clean home — compact admin hero + swipe promos + host cards */
 export function HomeScreen() {
@@ -38,14 +48,18 @@ export function HomeScreen() {
   const [query, setQuery] = useState("");
   const [tab, setTab] = useState<Tab>("call");
   const [region, setRegion] = useState<(typeof REGIONS)[number]>("All");
+  const [category, setCategory] =
+    useState<(typeof CATEGORIES)[number]>("All");
   const [discountOpen, setDiscountOpen] = useState(false);
   const [searchingId, setSearchingId] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [promos, setPromos] = useState<PromoSlide[]>([]);
   const headerRef = useRef<HTMLElement>(null);
   const [headerH, setHeaderH] = useState(0);
   const hostSigRef = useRef<string>("");
   const promoSigRef = useRef<string>("");
+  const reloadHostsRef = useRef<() => Promise<void>>(async () => undefined);
 
   useEffect(() => {
     const el = headerRef.current;
@@ -88,6 +102,7 @@ export function HomeScreen() {
         if (!cancelled) setLoading(false);
       }
     };
+    reloadHostsRef.current = load;
     void load();
     const timer = setInterval(() => void load(), 8_000);
     return () => {
@@ -96,6 +111,17 @@ export function HomeScreen() {
       clearInterval(timer);
     };
   }, []);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
+    try {
+      await reloadHostsRef.current();
+      setRotationSeed((s) => s + 1);
+      pushToast("Hosts refreshed");
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -136,14 +162,16 @@ export function HomeScreen() {
   };
 
   const filtered = useMemo(() => {
-    let list = filterHosts(hosts, { query, category: "All" });
+    let list = filterHosts(hosts, { query, category });
     if (region !== "All") {
       list = list.filter((h) =>
         h.country.toLowerCase().includes(region.toLowerCase()),
       );
     }
     return list;
-  }, [hosts, query, region]);
+  }, [hosts, query, region, category]);
+
+  const sections = useMemo(() => sectionHosts(filtered), [filtered]);
 
   const liveHosts = useMemo(
     () => filtered.filter((h) => h.live),
@@ -284,6 +312,39 @@ export function HomeScreen() {
       <HomePromoSwipe promos={promos} />
 
       <div className="px-4 pt-3">
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <div className="flex gap-1.5 rounded-full border border-line bg-ink-2/70 p-1">
+            {(
+              [
+                ["call", "Online"],
+                ["live", "Live"],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => setTab(id)}
+                className={`min-h-9 rounded-full px-3.5 text-xs font-bold ${
+                  tab === id ? "bg-coral text-white" : "text-muted"
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            onClick={() => void onRefresh()}
+            disabled={refreshing}
+            className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-line bg-ink-2/80 px-3 text-xs font-bold text-sand disabled:opacity-60"
+          >
+            <RefreshCw
+              className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`}
+            />
+            Refresh
+          </button>
+        </div>
+
         <div className="flex gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {REGIONS.map((r) => (
             <button
@@ -306,13 +367,64 @@ export function HomeScreen() {
             </button>
           ))}
         </div>
+
+        <div className="mt-2 flex gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+          {CATEGORIES.map((c) => (
+            <button
+              key={c}
+              type="button"
+              onClick={() => setCategory(c)}
+              className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-semibold ${
+                category === c
+                  ? "bg-cyan/20 text-cyan"
+                  : "bg-white/6 text-white/65"
+              }`}
+            >
+              {c}
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="mt-3">
         <LibraryPreviewPlayer category="preview" countdownSec={8} />
       </div>
 
+      {!loading ? (
+        <div className="mt-4 space-y-4">
+          <HostRail
+            title="Recommended"
+            hosts={sections.recommended}
+            mode={tab === "live" ? "watch" : "call"}
+          />
+          <HostRail
+            title="Online hosts"
+            hosts={sections.online.filter((h) => !h.live)}
+            mode="call"
+          />
+          <HostRail title="New hosts" hosts={sections.newest} mode="call" />
+          <HostRail
+            title="Top hosts"
+            hosts={sections.topRated}
+            mode="call"
+          />
+          <HostRail
+            title="Trending"
+            hosts={sections.trending}
+            mode={tab === "live" ? "watch" : "call"}
+          />
+          <HostRail
+            title="Recently active"
+            hosts={sections.recent}
+            mode="call"
+          />
+        </div>
+      ) : null}
+
       <div className="mt-4">
+        <h2 className="mb-2 px-4 font-display text-sm font-bold">
+          {tab === "live" ? "Live now" : "Ready to call"}
+        </h2>
         {loading ? (
           <HostGridSkeleton count={6} />
         ) : list.length === 0 ? (
@@ -389,5 +501,32 @@ export function HomeScreen() {
         ) : null}
       </AnimatePresence>
     </main>
+  );
+}
+
+function HostRail({
+  title,
+  hosts,
+  mode,
+}: {
+  title: string;
+  hosts: DiscoverHost[];
+  mode: "call" | "watch";
+}) {
+  if (!hosts.length) return null;
+  return (
+    <section className="min-w-0">
+      <div className="mb-2 flex items-end justify-between px-4">
+        <h2 className="font-display text-sm font-bold">{title}</h2>
+        <span className="text-[10px] text-muted">{hosts.length}</span>
+      </div>
+      <div className="flex gap-2.5 overflow-x-auto px-4 pb-1 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {hosts.slice(0, 8).map((h, i) => (
+          <div key={`${title}-${h.id}`} className="w-[42%] min-w-[148px] max-w-[170px] shrink-0">
+            <HostGridCard host={h} mode={mode} index={i} />
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }

@@ -7,17 +7,22 @@ import {
   ChevronRight,
   Crown,
   Flame,
+  Heart,
   History,
   ImageUp,
   LifeBuoy,
+  LogIn,
   Pencil,
   Phone,
   RefreshCw,
+  Settings,
   Sparkles,
   Store,
   Trophy,
+  UserPlus,
   UserRound,
 } from "lucide-react";
+import { getSession, type AuthSession } from "@/lib/authSession";
 import { DailyCheckInModal } from "@/components/engagement/DailyCheckInModal";
 import { LuckySpinModal } from "@/components/engagement/LuckySpinModal";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -100,8 +105,17 @@ export default function ProfilePage() {
   const [editingAvatar, setEditingAvatar] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [historyTab, setHistoryTab] = useState<"calls" | "coins">("calls");
+  const [callFilter, setCallFilter] = useState<
+    "all" | "incoming" | "outgoing" | "missed"
+  >("all");
+  const [callQuery, setCallQuery] = useState("");
+  const [session, setSession] = useState<AuthSession | null>(null);
   const [savingAvatar, setSavingAvatar] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setSession(getSession());
+  }, []);
 
   // SSR-safe: keep defaults until client has hydrated local engagement
   const level = clientReady ? engagement.level : 1;
@@ -224,7 +238,16 @@ export default function ProfilePage() {
           </p>
           <h1 className="font-display text-xl font-bold">Profile</h1>
         </div>
-        <ThemeToggle />
+        <div className="flex items-center gap-2">
+          <ThemeToggle />
+          <Link
+            href="/settings"
+            className="rounded-full border border-line bg-ink-2/80 p-2.5"
+            aria-label="Settings"
+          >
+            <Settings className="h-4 w-4" />
+          </Link>
+        </div>
       </header>
 
       <section className="px-4 pb-5">
@@ -421,6 +444,59 @@ export default function ProfilePage() {
         </div>
 
         <div className="mt-2.5 space-y-2">
+          {session ? (
+            <div className="rounded-2xl border border-teal/25 bg-teal/5 px-3.5 py-3 text-xs">
+              Signed in as{" "}
+              <span className="font-bold text-sand">{session.user.email}</span>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-2">
+              <Link
+                href="/login"
+                className="flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-coral/35 bg-coral/10 text-xs font-bold text-coral"
+              >
+                <LogIn className="h-4 w-4" />
+                Sign in
+              </Link>
+              <Link
+                href="/register"
+                className="flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-line bg-ink-2/70 text-xs font-bold"
+              >
+                <UserPlus className="h-4 w-4" />
+                Register
+              </Link>
+            </div>
+          )}
+          <Link
+            href="/favorites"
+            className="flex items-center gap-3 rounded-2xl border border-line bg-ink-2/60 px-3.5 py-3.5"
+          >
+            <Heart className="h-5 w-5 shrink-0 text-coral" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-display text-sm font-bold">
+                Favorites &amp; following
+              </span>
+              <span className="text-[11px] text-muted">
+                Saved hosts · recently viewed
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted" />
+          </Link>
+          <Link
+            href="/referral"
+            className="flex items-center gap-3 rounded-2xl border border-gold/25 bg-gold/5 px-3.5 py-3.5"
+          >
+            <UserPlus className="h-5 w-5 shrink-0 text-gold" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-display text-sm font-bold">
+                Invite &amp; earn
+              </span>
+              <span className="text-[11px] text-muted">
+                Referral code · rewards history
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted" />
+          </Link>
           <Link
             href="/premium"
             className="flex items-center gap-3 rounded-2xl border border-gold/30 bg-gradient-to-r from-gold/15 to-transparent px-3.5 py-3.5"
@@ -452,16 +528,31 @@ export default function ProfilePage() {
             <ChevronRight className="h-4 w-4 text-muted" />
           </Link>
           <Link
-            href="/support"
+            href="/help"
             className="flex items-center gap-3 rounded-2xl border border-cyan/25 bg-cyan/5 px-3.5 py-3.5"
           >
             <LifeBuoy className="h-5 w-5 shrink-0 text-cyan" />
             <span className="min-w-0 flex-1">
               <span className="block font-display text-sm font-bold">
-                Help &amp; Support
+                Help Center
               </span>
               <span className="text-[11px] text-muted">
-                Recharge issues · report a problem · contact admin
+                FAQ · live support · report a bug
+              </span>
+            </span>
+            <ChevronRight className="h-4 w-4 text-muted" />
+          </Link>
+          <Link
+            href="/settings"
+            className="flex items-center gap-3 rounded-2xl border border-line bg-ink-2/60 px-3.5 py-3.5"
+          >
+            <Settings className="h-5 w-5 shrink-0 text-muted" />
+            <span className="min-w-0 flex-1">
+              <span className="block font-display text-sm font-bold">
+                Settings
+              </span>
+              <span className="text-[11px] text-muted">
+                Language · dark mode · privacy · logout
               </span>
             </span>
             <ChevronRight className="h-4 w-4 text-muted" />
@@ -545,40 +636,96 @@ export default function ProfilePage() {
         </div>
 
         {historyTab === "calls" ? (
-          <ul className="space-y-2">
-            {callHistory.map((c) => {
-              const when = new Date(c.startedAt || c.endedAt);
-              return (
-                <li
-                  key={c.id}
-                  className="rounded-xl border border-line bg-ink-2/40 px-3.5 py-2.5"
+          <>
+            <div className="mb-2 flex gap-1.5 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              {(
+                [
+                  ["all", "All"],
+                  ["outgoing", "Outgoing"],
+                  ["incoming", "Incoming"],
+                  ["missed", "Missed"],
+                ] as const
+              ).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setCallFilter(id)}
+                  className={`shrink-0 rounded-full px-3 py-1.5 text-[11px] font-bold ${
+                    callFilter === id
+                      ? "bg-coral text-white"
+                      : "border border-line bg-ink-2/50 text-muted"
+                  }`}
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold">
-                        {c.hostName || "Host"}
-                      </p>
-                      <p className="text-[10px] text-muted">
-                        {when.toLocaleDateString()} · {when.toLocaleTimeString()}
-                      </p>
-                      <p className="mt-0.5 text-[10px] text-muted">
-                        Duration {formatCallDuration(c.durationSec)} ·{" "}
-                        {c.billedMinutes} min billed
-                      </p>
-                    </div>
-                    <p className="shrink-0 font-display text-sm font-extrabold text-coral">
-                      −{c.coinsSpent}
-                    </p>
-                  </div>
-                </li>
-              );
-            })}
-            {!callHistory.length ? (
-              <p className="py-6 text-center text-xs text-muted">
-                No calls yet
-              </p>
-            ) : null}
-          </ul>
+                  {label}
+                </button>
+              ))}
+            </div>
+            <input
+              value={callQuery}
+              onChange={(e) => setCallQuery(e.target.value)}
+              placeholder="Search host…"
+              className="mb-3 w-full rounded-2xl border border-line bg-ink-2/50 px-3.5 py-2.5 text-sm outline-none"
+            />
+            <ul className="space-y-2">
+              {callHistory
+                .filter((c) => {
+                  const q = callQuery.trim().toLowerCase();
+                  if (q && !(c.hostName || "").toLowerCase().includes(q)) {
+                    return false;
+                  }
+                  const status = (c.status || c.endReason || "").toLowerCase();
+                  if (callFilter === "missed") {
+                    return (
+                      status.includes("miss") ||
+                      (c.durationSec <= 0 && c.coinsSpent === 0)
+                    );
+                  }
+                  if (callFilter === "incoming") {
+                    return status.includes("in") || status.includes("incoming");
+                  }
+                  if (callFilter === "outgoing") {
+                    return (
+                      !status.includes("miss") &&
+                      !status.includes("incoming")
+                    );
+                  }
+                  return true;
+                })
+                .map((c) => {
+                  const when = new Date(c.startedAt || c.endedAt);
+                  return (
+                    <li
+                      key={c.id}
+                      className="rounded-xl border border-line bg-ink-2/40 px-3.5 py-2.5"
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold">
+                            {c.hostName || "Host"}
+                          </p>
+                          <p className="text-[10px] text-muted">
+                            {when.toLocaleDateString()} ·{" "}
+                            {when.toLocaleTimeString()}
+                          </p>
+                          <p className="mt-0.5 text-[10px] text-muted">
+                            Duration {formatCallDuration(c.durationSec)} ·{" "}
+                            {c.billedMinutes} min billed
+                          </p>
+                        </div>
+                        <p className="shrink-0 font-display text-sm font-extrabold text-coral">
+                          −{c.coinsSpent}
+                        </p>
+                      </div>
+                    </li>
+                  );
+                })}
+              {!callHistory.length ? (
+                <p className="py-6 text-center text-xs text-muted">
+                  No calls yet
+                </p>
+              ) : null}
+            </ul>
+          </>
         ) : (
           <ul className="space-y-2">
             {(history.length ? history : engagement.coinHistory)

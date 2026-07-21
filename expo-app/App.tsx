@@ -201,8 +201,10 @@ function ZukoWebShell() {
   const installBridge = useMemo(() => {
     if (!installId) return undefined;
     const safe = JSON.stringify(installId);
-    // Keep luma_install_id_v1 key so web wallet/device identity stays continuous
-    return `window.__LUMA_INSTALL_ID__=${safe};try{localStorage.setItem('luma_install_id_v1',${safe});}catch(e){}true;`;
+    // Keep luma_install_id_v1 key so web wallet/device identity stays continuous.
+    // Auth session (zuko_user_session_v1) lives in WebView localStorage — same
+    // origin as the production web app — for secure session continuity.
+    return `window.__LUMA_INSTALL_ID__=${safe};window.__ZUKO_ANDROID__=1;try{localStorage.setItem('luma_install_id_v1',${safe});localStorage.setItem('zuko_android_shell_v1','1');}catch(e){}true;`;
   }, [installId]);
 
   if (!ready) {
