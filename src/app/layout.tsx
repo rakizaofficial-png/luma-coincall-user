@@ -7,6 +7,7 @@ import { DiamondEntranceBlast } from "@/components/DiamondEntranceBlast";
 import { WelcomePushEngine } from "@/components/welcome/WelcomePushEngine";
 import { CoinBurstHost } from "@/components/engagement/CoinBurstHost";
 import { ChatUnreadWatcher } from "@/components/ChatUnreadWatcher";
+import { OfflineBanner } from "@/components/OfflineBanner";
 import "./globals.css";
 
 const syne = Syne({
@@ -36,9 +37,10 @@ export default function RootLayout({
     <html lang="en" className={`${syne.variable} ${manrope.variable} h-full`}>
       <body className="app-atmosphere app-grain min-h-full antialiased">
         <AppProvider>
-          <div className="phone-shell safe-bottom relative overflow-hidden">
+          <div className="phone-shell safe-bottom relative max-w-[min(100vw,430px)] overflow-x-hidden">
             <DiamondEntranceBlast />
             <CoinBurstHost />
+            <OfflineBanner />
             {children}
             <BottomNav />
             <ToastHost />

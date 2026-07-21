@@ -39,12 +39,20 @@ export function BottomNav() {
     pathname.startsWith("/party/") ||
     pathname.startsWith("/feed") ||
     pathname === "/premium" ||
-    pathname === "/support";
+    pathname === "/support" ||
+    pathname === "/help" ||
+    pathname === "/settings" ||
+    pathname === "/login" ||
+    pathname === "/register" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password" ||
+    pathname === "/favorites" ||
+    pathname === "/referral";
 
   if (hide) return null;
 
   return (
-    <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-[430px] -translate-x-1/2 border-t border-white/10 bg-[#0b0b0f]/96 px-1.5 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl">
+    <nav className="fixed bottom-0 left-1/2 z-40 w-full max-w-[min(100vw,430px)] -translate-x-1/2 border-t border-white/10 bg-[#0b0b0f]/96 px-1.5 pb-[max(0.35rem,env(safe-area-inset-bottom))] backdrop-blur-xl">
       <ul className="grid grid-cols-5 gap-0.5 py-1.5">
         {tabs.map((tab) => {
           const active =
@@ -52,8 +60,12 @@ export function BottomNav() {
               ? pathname === "/"
               : tab.href === "/profile"
                 ? pathname.startsWith("/profile") ||
-                  pathname.startsWith("/wallet") ||
-                  pathname.startsWith("/rewards")
+                  pathname === "/wallet" ||
+                  pathname.startsWith("/rewards") ||
+                  pathname.startsWith("/settings") ||
+                  pathname.startsWith("/favorites") ||
+                  pathname.startsWith("/referral") ||
+                  pathname.startsWith("/help")
                 : pathname.startsWith(tab.href);
           const Icon = tab.icon;
           return (

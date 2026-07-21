@@ -3,7 +3,7 @@
 import { use, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
-import { ArrowLeft, Gift, Send, Video } from "lucide-react";
+import { ArrowLeft, Gift, ImagePlus, Send, Smile, Video } from "lucide-react";
 import { resolveLiveCreator, threads } from "@/lib/data";
 import { useApp } from "@/lib/store";
 import { GiftSheet } from "@/components/GiftSheet";
@@ -35,6 +35,7 @@ export default function ChatThreadPage({
   const [messages, setMessages] = useState<DmMessage[]>([]);
   const [text, setText] = useState("");
   const [giftOpen, setGiftOpen] = useState(false);
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const [sending, setSending] = useState(false);
   const [hostMeta, setHostMeta] = useState({
     id: "",
@@ -43,7 +44,9 @@ export default function ChatThreadPage({
     online: true,
   });
   const bottomRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const userId = useMemo(() => getDeviceUserId(), []);
+  const EMOJIS = ["😀", "😍", "🔥", "💕", "😘", "✨", "🎉", "👋", "🥰", "😎"];
 
   useEffect(() => {
     let cancelled = false;
@@ -120,8 +123,9 @@ export default function ChatThreadPage({
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
 
-  const send = async () => {
-    if (!text.trim() || !hostMeta.id || sending) return;
+  const send = async (payload?: string) => {
+    const outgoing = (payload ?? text).trim();
+    if (!outgoing || !hostMeta.id || sending) return;
     if (vipTier === "diamond") triggerEntranceBlast();
     setSending(true);
     const tid = openDmWithHost({
@@ -129,8 +133,8 @@ export default function ChatThreadPage({
       hostName: hostMeta.name,
       hostAvatar: hostMeta.image,
     });
-    const outgoing = text.trim();
-    setText("");
+    if (!payload) setText("");
+    setEmojiOpen(false);
     try {
       const { mine } = await sendDmMessage(tid, outgoing, {
         hostId: hostMeta.id,
@@ -142,11 +146,23 @@ export default function ChatThreadPage({
         return [...m.filter((x) => !x.id.startsWith("local_")), mine];
       });
     } catch (e) {
-      setText(outgoing);
+      if (!payload) setText(outgoing);
       pushToast?.(e instanceof Error ? e.message : "Could not send");
     } finally {
       setSending(false);
     }
+  };
+
+  const onPickImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      void send(`[Photo] ${file.name || "image"}`);
+      pushToast("Image shared in chat");
+    };
+    reader.readAsDataURL(file);
   };
 
   return (
@@ -195,15 +211,36 @@ export default function ChatThreadPage({
             animate={{ opacity: 1, y: 0 }}
             className={`flex ${m.from === "me" ? "justify-end" : "justify-start"}`}
           >
-            <VipChatBubble tier={vipTier} fromMe={m.from === "me"}>
-              {m.text}
-            </VipChatBubble>
+            <div className="max-w-[85%]">
+              <VipChatBubble tier={vipTier} fromMe={m.from === "me"}>
+                {m.text.startsWith("[Photo]") ? "📷 Photo" : m.text}
+              </VipChatBubble>
+              {m.from === "me" ? (
+                <p className="mt-0.5 text-right text-[10px] text-white/40">
+                  Read
+                </p>
+              ) : null}
+            </div>
           </motion.div>
         ))}
         <div ref={bottomRef} />
       </div>
 
       <div className="border-t border-white/10 bg-ink-2/80 px-3 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        {emojiOpen ? (
+          <div className="mb-2 flex flex-wrap gap-1.5 rounded-2xl border border-white/10 bg-[#06040b] p-2">
+            {EMOJIS.map((e) => (
+              <button
+                key={e}
+                type="button"
+                onClick={() => setText((t) => t + e)}
+                className="flex h-9 w-9 items-center justify-center rounded-xl text-lg"
+              >
+                {e}
+              </button>
+            ))}
+          </div>
+        ) : null}
         <div className="flex items-center gap-2">
           <button
             type="button"
@@ -213,13 +250,36 @@ export default function ChatThreadPage({
           >
             <Gift className="h-5 w-5" />
           </button>
+          <button
+            type="button"
+            onClick={() => setEmojiOpen((v) => !v)}
+            className="rounded-full bg-ink-3 p-2.5 text-sand"
+            aria-label="Emoji"
+          >
+            <Smile className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="rounded-full bg-ink-3 p-2.5 text-sand"
+            aria-label="Share image"
+          >
+            <ImagePlus className="h-5 w-5" />
+          </button>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => void onPickImage(e)}
+          />
           <input
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && void send()}
             placeholder="Write a message…"
             disabled={sending}
-            className="flex-1 rounded-full border border-white/10 bg-[#06040b] px-4 py-2.5 text-sm text-sand outline-none placeholder:text-white/35 disabled:opacity-60"
+            className="min-w-0 flex-1 rounded-full border border-white/10 bg-[#06040b] px-4 py-2.5 text-sm text-sand outline-none placeholder:text-white/35 disabled:opacity-60"
           />
           <button
             type="button"
@@ -232,7 +292,7 @@ export default function ChatThreadPage({
           </button>
         </div>
         <p className="mt-1.5 text-center text-[10px] text-white/35">
-          Host sees this in CoinCall → Chat
+          Secure chat · host sees this in CoinCall
         </p>
       </div>
 
