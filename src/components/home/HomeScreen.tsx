@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
-import { Percent, Search, Video, X } from "lucide-react";
+import { Percent, Search, X } from "lucide-react";
 import {
   HostGridCard,
   HostGridSkeleton,
@@ -14,15 +14,13 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 import { WalletDiamond } from "@/components/WalletDiamond";
 import { fetchLiveHosts, searchProfileByAppId } from "@/lib/api";
 import {
+  catalogDiscoverHosts,
   filterHosts,
   mergeDiscoverHosts,
+  rotateHosts,
   type DiscoverHost,
 } from "@/lib/discoverHosts";
-import {
-  fetchHomeBanners,
-  type HomeHeroBanner,
-  type PromoSlide,
-} from "@/lib/homeBanners";
+import { fetchHomeBanners, type PromoSlide } from "@/lib/homeBanners";
 import { useApp } from "@/lib/store";
 import { useRouter } from "next/navigation";
 
@@ -42,17 +40,50 @@ export function HomeScreen() {
   const [region, setRegion] = useState<(typeof REGIONS)[number]>("All");
   const [discountOpen, setDiscountOpen] = useState(false);
   const [searchingId, setSearchingId] = useState(false);
-  const [hero, setHero] = useState<HomeHeroBanner | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
   const [promos, setPromos] = useState<PromoSlide[]>([]);
+  const headerRef = useRef<HTMLElement>(null);
+  const [headerH, setHeaderH] = useState(0);
+  const hostSigRef = useRef<string>("");
+  const promoSigRef = useRef<string>("");
+
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const measure = () => setHeaderH(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
+
+    // Only commit a new host list when it actually changed, so the 8s poll
+    // doesn't force a redundant re-render (and flicker) on unchanged data.
+    const applyHosts = (next: DiscoverHost[]) => {
+      const sig = next
+        .map((h) => `${h.id}:${h.online ? 1 : 0}${h.live ? 1 : 0}${h.onCall ? 1 : 0}`)
+        .join("|");
+      if (sig === hostSigRef.current) return;
+      hostSigRef.current = sig;
+      setHosts(next);
+    };
+
+    // A cold/unreachable backend fetch can hang with no timeout, leaving the
+    // skeleton loader spinning indefinitely. Clear the initial loading state
+    // after a short grace period so we fall back to the empty/list UI fast.
+    const loadingGuard = setTimeout(() => {
+      if (!cancelled) setLoading(false);
+    }, 3500);
+
     const load = async () => {
       try {
         const live = await fetchLiveHosts();
-        if (!cancelled) setHosts(mergeDiscoverHosts(live));
+        if (!cancelled) applyHosts(mergeDiscoverHosts(live));
       } catch {
-        if (!cancelled) setHosts(mergeDiscoverHosts([]));
+        if (!cancelled) applyHosts(mergeDiscoverHosts([]));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -61,6 +92,7 @@ export function HomeScreen() {
     const timer = setInterval(() => void load(), 8_000);
     return () => {
       cancelled = true;
+      clearTimeout(loadingGuard);
       clearInterval(timer);
     };
   }, []);
@@ -70,8 +102,11 @@ export function HomeScreen() {
     const loadBanners = async () => {
       const data = await fetchHomeBanners();
       if (cancelled) return;
-      setHero(data.hero);
-      setPromos(data.promos || []);
+      const next = data.promos || [];
+      const sig = next.map((p) => p.id).join("|");
+      if (sig === promoSigRef.current) return;
+      promoSigRef.current = sig;
+      setPromos(next);
     };
     void loadBanners();
     const t = setInterval(() => void loadBanners(), 30_000);
@@ -119,7 +154,40 @@ export function HomeScreen() {
     [filtered],
   );
 
-  const list = tab === "live" ? liveHosts : callingHosts;
+  const baseList = tab === "live" ? liveHosts : callingHosts;
+
+  // Auto-rotation: bump a seed on a timer and whenever the tab becomes visible
+  // so the discovery feed never looks static — profiles reshuffle over time
+  // and on every return to the screen.
+  // Start from a fixed seed so SSR and the first client render match (no
+  // hydration mismatch); randomize + start rotating only after mount.
+  const [rotationSeed, setRotationSeed] = useState(0);
+  useEffect(() => {
+    setRotationSeed(Math.floor(Date.now() / 1000));
+    const t = setInterval(() => setRotationSeed((s) => s + 1), 15000);
+    const onVis = () => {
+      if (!document.hidden) setRotationSeed((s) => s + 1);
+    };
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, []);
+
+  // Keep the feed populated with fresh, rotating faces even when the live API
+  // returns nothing (falls back to catalog hosts), then shuffle by the seed.
+  const list = useMemo(() => {
+    let src = baseList;
+    if (src.length === 0) {
+      src = catalogDiscoverHosts(tab === "live" ? "live" : "call").filter(
+        (h) =>
+          region === "All" ||
+          h.country.toLowerCase().includes(region.toLowerCase()),
+      );
+    }
+    return rotateHosts(src, rotationSeed);
+  }, [baseList, tab, region, rotationSeed]);
 
   const runAppIdSearch = async () => {
     const q = query.trim();
@@ -144,90 +212,79 @@ export function HomeScreen() {
     }
   };
 
-  const heroFrom = hero?.gradientFrom || "#ffb020";
-  const heroTo = hero?.gradientTo || "#ff6b2b";
-  const showHero = Boolean(hero);
-
   return (
     <main className="relative pb-28">
       <header
-        className="overflow-hidden px-4 pb-3 pt-[max(0.5rem,env(safe-area-inset-top))]"
-        style={
-          showHero
-            ? {
-                background: `linear-gradient(135deg, ${heroFrom}, ${heroTo})`,
-              }
-            : undefined
-        }
+        ref={headerRef}
+        className="fixed left-1/2 top-0 z-40 w-full max-w-[430px] -translate-x-1/2 border-b border-line/50 bg-ink/90 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur-xl"
       >
-        <div className="mb-1.5 flex items-center justify-between">
-          <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-black/50">
-            Luma
-          </p>
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <span className="rounded-full bg-black/15 px-2.5 py-1 text-[10px] font-bold text-black/80">
+            <button
+              type="button"
+              onClick={() => setSearchOpen((v) => !v)}
+              aria-label="Search"
+              aria-expanded={searchOpen}
+              className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-line ${
+                searchOpen ? "bg-coral text-white" : "bg-ink-2/80 text-sand"
+              }`}
+            >
+              <Search className="h-4 w-4" />
+            </button>
+            <span className="rounded-full border border-line bg-ink-2/80 px-2.5 py-1.5 text-xs font-bold text-sand">
               {coins} ¢
             </span>
             <ThemeToggle />
             <WalletDiamond compact />
-            <Link
-              href="/call"
-              className="flex h-8 w-8 items-center justify-center rounded-xl bg-[#ff6b1a] text-white shadow"
-              aria-label="Video lobby"
-            >
-              <Video className="h-3.5 w-3.5" />
-            </Link>
           </div>
+          <Link
+            href="/match"
+            className="shrink-0 rounded-full bg-gradient-to-r from-[#ffb020] to-[#ff6b2b] px-3.5 py-2 text-[11px] font-bold text-black shadow"
+          >
+            Tap to Match →
+          </Link>
         </div>
-        {showHero ? (
-          <div className="flex items-end justify-between gap-3">
-            <div className="min-w-0 flex-1">
-              <h1 className="font-display text-[1.25rem] font-extrabold leading-tight text-[#2a1600]">
-                {hero?.title || "Meet more friends"}
-              </h1>
-              {hero?.subtitle ? (
-                <p className="mt-0.5 text-[11px] font-medium text-black/55">
-                  {hero.subtitle}
-                </p>
-              ) : null}
-            </div>
-            <Link
-              href={hero?.ctaHref || "/match"}
-              className="shrink-0 rounded-full bg-white/90 px-3.5 py-1.5 text-[11px] font-bold text-[#2a1600] shadow"
+
+        <AnimatePresence initial={false}>
+          {searchOpen ? (
+            <motion.label
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              className="mt-2 flex items-center gap-2 overflow-hidden rounded-2xl border border-line bg-ink-2/70 px-3 py-2.5"
             >
-              {hero?.ctaLabel || "Match"} →
-            </Link>
-          </div>
-        ) : null}
+              <Search className="h-4 w-4 shrink-0 text-muted" />
+              <input
+                autoFocus
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") void runAppIdSearch();
+                }}
+                placeholder="Search hosts or 6-digit ID…"
+                className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
+              />
+              {/^\d{6}$/.test(query.trim()) ? (
+                <button
+                  type="button"
+                  disabled={searchingId}
+                  onClick={() => void runAppIdSearch()}
+                  className="shrink-0 rounded-lg bg-coral px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-60"
+                >
+                  {searchingId ? "…" : "Go"}
+                </button>
+              ) : null}
+            </motion.label>
+          ) : null}
+        </AnimatePresence>
       </header>
+
+      <div aria-hidden style={{ height: headerH }} />
 
       <HomePromoSwipe promos={promos} />
 
-      <div className="sticky top-0 z-30 border-b border-line/50 bg-ink/90 px-4 pb-3 pt-3 backdrop-blur-xl">
-        <label className="flex items-center gap-2 rounded-2xl border border-line bg-ink-2/70 px-3 py-2.5">
-          <Search className="h-4 w-4 shrink-0 text-muted" />
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void runAppIdSearch();
-            }}
-            placeholder="Search hosts or 6-digit ID…"
-            className="w-full bg-transparent text-sm outline-none placeholder:text-muted"
-          />
-          {/^\d{6}$/.test(query.trim()) ? (
-            <button
-              type="button"
-              disabled={searchingId}
-              onClick={() => void runAppIdSearch()}
-              className="shrink-0 rounded-lg bg-coral px-2.5 py-1 text-[11px] font-bold text-white disabled:opacity-60"
-            >
-              {searchingId ? "…" : "Go"}
-            </button>
-          ) : null}
-        </label>
-
-        <div className="mt-3 flex gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      <div className="px-4 pt-3">
+        <div className="flex gap-2 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {REGIONS.map((r) => (
             <button
               key={r}
@@ -248,31 +305,6 @@ export function HomeScreen() {
                     : r}
             </button>
           ))}
-        </div>
-
-        <div className="mt-3 grid grid-cols-2 gap-1 rounded-2xl border border-line bg-ink-2/60 p-1">
-          <button
-            type="button"
-            onClick={() => setTab("live")}
-            className={`rounded-xl py-2.5 text-center text-xs font-bold transition ${
-              tab === "live"
-                ? "bg-coral text-white"
-                : "text-muted hover:text-sand"
-            }`}
-          >
-            Live
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("call")}
-            className={`rounded-xl py-2.5 text-center text-xs font-bold transition ${
-              tab === "call"
-                ? "bg-[#ff9f1a] text-black"
-                : "text-muted hover:text-sand"
-            }`}
-          >
-            Online
-          </button>
         </div>
       </div>
 

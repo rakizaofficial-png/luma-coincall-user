@@ -30,6 +30,7 @@ import {
   setFreeTrialActive,
   setNotifyOptIn,
   spinLuckyWheel,
+  canSpin,
   canUseFreeTrial,
   getEngagement,
   emptyEngagement,
@@ -335,6 +336,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         });
         rt.connect();
         unsub = rt.subscribe((ev) => {
+          // Global incoming-call listener registered at the app root so the
+          // mobile app actively listens for call triggers just like web.
+          if (ev.type === "call:incoming" || ev.type === "call:update") {
+            console.log(`[realtime] ${ev.type}`, ev.payload);
+          }
           if (
             ev.type === "wallet:updated" &&
             ev.payload.userId === local.userId
@@ -433,6 +439,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, [pushToast, triggerCoinBurst]);
 
   const doLuckySpin = useCallback(async () => {
+    // Enforce the spin limits BEFORE hitting the server so no extra coins are
+    // ever granted once the daily limit or lifetime cap is reached.
+    const eng = getEngagement();
+    if (!canSpin(eng)) {
+      const msg =
+        spinsRemaining(eng) <= 0
+          ? "No spins left today — come back tomorrow"
+          : "Spin reward limit reached";
+      pushToast(msg);
+      return { state: eng, coins: 0, xp: 0, message: msg };
+    }
     try {
       const data = await claimSpinRewardApi();
       setCoins(data.wallet.coinBalance);

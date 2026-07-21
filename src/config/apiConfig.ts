@@ -40,19 +40,53 @@ const read = (key: string, fallback = "") =>
   (typeof process !== "undefined" ? process.env[key] : undefined)?.trim() ||
   fallback;
 
+/**
+ * Native / mobile WebView fix:
+ * The API + WebSocket URLs are baked at build time and may point at
+ * `localhost` (the developer's machine). On a phone or Android emulator,
+ * `localhost` resolves to the *device itself*, so those requests never reach
+ * the backend — which is exactly why calls work in a desktop browser but fail
+ * on the mobile app / emulator.
+ *
+ * When the page is served from a non-localhost host (e.g. the Android emulator
+ * loads it via `http://10.0.2.2:3000`, or a device via a LAN IP), rewrite any
+ * `localhost`/`127.0.0.1` API/WS host to the host that actually served the
+ * page. On desktop (page host === localhost) this is a no-op, so web behaviour
+ * is unchanged.
+ */
+function resolveReachableHost(url: string): string {
+  if (typeof window === "undefined") return url;
+  const pageHost = window.location?.hostname;
+  if (!pageHost || pageHost === "localhost" || pageHost === "127.0.0.1") {
+    return url;
+  }
+  try {
+    const u = new URL(url);
+    if (u.hostname === "localhost" || u.hostname === "127.0.0.1") {
+      u.hostname = pageHost;
+      return u.toString().replace(/\/$/, "");
+    }
+  } catch {
+    /* relative / non-absolute URL — leave untouched */
+  }
+  return url;
+}
+
 export const apiConfig = {
   env: read("NEXT_PUBLIC_APP_ENV", "production"),
 
   /** CoinCall Express API root including `/api` */
-  apiBaseUrl: read(
-    "NEXT_PUBLIC_API_BASE_URL",
-    "https://coincall-api.onrender.com/api",
-  ).replace(/\/$/, ""),
+  apiBaseUrl: resolveReachableHost(
+    read(
+      "NEXT_PUBLIC_API_BASE_URL",
+      "https://coincall-api.onrender.com/api",
+    ).replace(/\/$/, ""),
+  ),
 
   /** WebSocket URL — derived from API host unless overridden */
   wsUrl: (() => {
     const explicit = read("NEXT_PUBLIC_WS_URL");
-    if (explicit) return explicit.replace(/\/$/, "");
+    if (explicit) return resolveReachableHost(explicit.replace(/\/$/, ""));
     const api = read(
       "NEXT_PUBLIC_API_BASE_URL",
       "https://coincall-api.onrender.com/api",
@@ -61,7 +95,7 @@ export const apiConfig = {
       const u = new URL(api.replace(/\/api$/, ""));
       u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
       u.pathname = "/ws";
-      return u.toString().replace(/\/$/, "");
+      return resolveReachableHost(u.toString().replace(/\/$/, ""));
     } catch {
       return "wss://coincall-api.onrender.com/ws";
     }
