@@ -921,13 +921,13 @@ export default function HostOnlyLiveRoomPage({
     `https://i.pravatar.cc/150?u=${encodeURIComponent(id)}`;
 
   return (
-    <main className="relative h-dvh max-h-dvh overflow-hidden bg-black">
-      {/* Agora remote video plane */}
+    <main className="fixed inset-0 z-40 mx-auto max-w-[430px] overflow-hidden bg-black">
+      {/* Agora remote video plane — edge-to-edge mobile fit */}
       <div
         ref={videoRef}
         id="agora-live-remote"
-        className={`absolute inset-0 z-0 bg-black [&_video]:h-full [&_video]:w-full [&_video]:object-cover ${
-          needsUnlock ? "scale-110 blur-2xl brightness-50" : ""
+        className={`absolute inset-0 z-0 overflow-hidden bg-black [&_video]:h-full [&_video]:w-full [&_video]:object-cover [&_canvas]:h-full [&_canvas]:w-full [&_canvas]:object-cover ${
+          needsUnlock ? "blur-2xl brightness-50" : ""
         }`}
       />
 
@@ -958,14 +958,20 @@ export default function HostOnlyLiveRoomPage({
             name={room?.hostName}
             alt=""
             fill
-            className="scale-110 opacity-55 blur-xl"
+            className="opacity-55 blur-xl"
           />
         </div>
       ) : null}
 
       <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-b from-black/50 via-transparent to-black/80" />
 
-      <div className="safe-header relative z-10 flex h-dvh max-h-dvh flex-col px-3 safe-footer">
+      <div
+        className="relative z-10 flex h-full min-h-0 flex-col px-3"
+        style={{
+          paddingTop: "max(0.5rem, env(safe-area-inset-top, 0px))",
+          paddingBottom: "max(0.35rem, env(safe-area-inset-bottom, 0px))",
+        }}
+      >
         {/* Header */}
         <div className="pointer-events-auto flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-2 rounded-full border border-white/20 bg-black/35 py-1 pl-1 pr-2 shadow-lg backdrop-blur-md">

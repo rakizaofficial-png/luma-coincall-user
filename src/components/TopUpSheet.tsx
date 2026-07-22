@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Coins, ShieldCheck, Sparkles, X, Zap } from "lucide-react";
 import { IAP_PRODUCTS, type IapProduct } from "@/lib/payments/iapCatalog";
 import { purchaseCoins } from "@/lib/payments/iap";
 import { useApp } from "@/lib/store";
+import { pushSheetCloser } from "@/lib/sheetBackStack";
 
 /**
  * TikTok-style recharge sheet — large coin packs, animated cards, Play Billing.
@@ -28,6 +29,11 @@ export function TopUpSheet({
   const [selectedProduct, setSelectedProduct] = useState<string>(
     IAP_PRODUCTS.find((p) => p.popular)?.productId || IAP_PRODUCTS[0]!.productId,
   );
+
+  useEffect(() => {
+    if (!open) return;
+    return pushSheetCloser(onClose);
+  }, [open, onClose]);
 
   const product: IapProduct =
     IAP_PRODUCTS.find((p) => p.productId === selectedProduct) || IAP_PRODUCTS[0]!;

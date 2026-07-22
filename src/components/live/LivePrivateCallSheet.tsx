@@ -1,8 +1,10 @@
 "use client";
 
+import { useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Coins, Phone, ShieldCheck, Video, X, Zap } from "lucide-react";
 import { HostAvatarImg } from "@/components/host/HostAvatarImg";
+import { pushSheetCloser } from "@/lib/sheetBackStack";
 
 /**
  * Pre-call confirmation — rate, balance check, estimated minutes.
@@ -38,6 +40,11 @@ export function LivePrivateCallSheet({
   const enough = balance >= rate;
   const minutes = Math.floor(balance / rate);
   const afterOne = Math.max(0, balance - rate);
+
+  useEffect(() => {
+    if (!open) return;
+    return pushSheetCloser(onClose);
+  }, [open, onClose]);
 
   return (
     <AnimatePresence>

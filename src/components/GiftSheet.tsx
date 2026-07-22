@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, X } from "lucide-react";
+import { Coins, Sparkles, X } from "lucide-react";
 import { gifts, type Gift } from "@/lib/data";
 import { fetchGiftCatalog } from "@/lib/giftCatalog";
 import { useApp } from "@/lib/store";
@@ -10,6 +10,7 @@ import { getDeviceUserId } from "@/lib/walletApi";
 import { requireApiBase } from "@/config/apiConfig";
 import { getRealtimeClient } from "@/lib/realtime/websocket";
 import { playGiftChime } from "@/lib/liveGiftSound";
+import { pushSheetCloser } from "@/lib/sheetBackStack";
 import {
   giftTxId,
   hasCompletedTx,
@@ -39,6 +40,10 @@ function giftTierLabel(g: Gift) {
   return "Small";
 }
 
+/**
+ * TikTok-style gift coin box — compact bottom sheet (~52dvh), scrollable grid.
+ * Never expands to full screen.
+ */
 export function GiftSheet({
   open,
   onClose,
@@ -54,7 +59,6 @@ export function GiftSheet({
   hostId?: string;
   roomId?: string;
   callId?: string;
-  /** Highlight gifts that meet this coin threshold (e.g. live unlock) */
   highlightMinCoins?: number;
 }) {
   const { spend, syncWallet, pushToast, displayName, userId, coins, openTopUp } =
@@ -63,6 +67,7 @@ export function GiftSheet({
   const [cinematic, setCinematic] = useState<Gift | null>(null);
   const [busy, setBusy] = useState(false);
   const [catalog, setCatalog] = useState<Gift[]>(gifts);
+  const [tab, setTab] = useState<"popular" | "luxury">("popular");
 
   useEffect(() => {
     if (!open) return;
@@ -75,8 +80,14 @@ export function GiftSheet({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+    return pushSheetCloser(onClose);
+  }, [open, onClose]);
+
   const basic = catalog.filter((g) => !isCinematic(g));
   const adult = catalog.filter((g) => isCinematic(g));
+  const shown = tab === "popular" ? basic : adult;
 
   const send = async (g: Gift) => {
     if (busy) return;
@@ -161,14 +172,14 @@ export function GiftSheet({
           setCinematic(null);
           onClose();
           setBusy(false);
-        }, 2800);
+        }, 2200);
       } else {
         setSending(g.emoji);
         setTimeout(() => {
           setSending(null);
           onClose();
           setBusy(false);
-        }, 700);
+        }, 650);
       }
     } catch (e) {
       pushToast?.(e instanceof Error ? e.message : "Could not send gift");
@@ -183,148 +194,176 @@ export function GiftSheet({
           <motion.button
             type="button"
             aria-label="Close"
-            className="fixed inset-0 z-50 bg-black/60"
+            className="fixed inset-0 z-[80] bg-black/45"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
             onClick={onClose}
           />
+
+          {/* TikTok coin box — bottom half only */}
           <motion.div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Gift box"
             initial={{ y: "100%" }}
             animate={{ y: 0 }}
             exit={{ y: "100%" }}
-            transition={{ type: "spring", stiffness: 320, damping: 32 }}
-            className="safe-footer fixed bottom-0 left-1/2 z-50 w-full max-w-[430px] -translate-x-1/2 rounded-t-3xl border border-line bg-ink-2 px-4 pb-8 pt-4"
+            transition={{ type: "spring", stiffness: 380, damping: 34, mass: 0.85 }}
+            className="fixed bottom-0 left-1/2 z-[85] flex w-full max-w-[430px] -translate-x-1/2 flex-col overflow-hidden rounded-t-[1.65rem] border border-white/12 bg-[#12141c]/98 shadow-[0_-20px_60px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
+            style={{
+              maxHeight: "min(52dvh, 420px)",
+              paddingBottom: "max(0.75rem, env(safe-area-inset-bottom, 0px))",
+            }}
           >
-            <div className="mb-4 flex items-center justify-between">
-              <div>
-                <h3 className="font-display text-lg font-bold">Send a gift</h3>
-                <p className="text-xs text-muted">
-                  {hostId
-                    ? "Goes to the host · coins deducted"
-                    : "Make the moment unforgettable"}
+            <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/25" />
+
+            <div className="flex shrink-0 items-center justify-between gap-2 px-3.5 pb-2 pt-2.5">
+              <div className="min-w-0">
+                <h3 className="font-display text-[15px] font-extrabold tracking-tight text-white">
+                  Gift box
+                </h3>
+                <p className="flex items-center gap-1 text-[11px] text-white/55">
+                  <Coins className="h-3 w-3 text-amber-300" />
+                  Balance{" "}
+                  <span className="font-bold text-amber-200">
+                    {coins.toLocaleString()}
+                  </span>
                 </p>
               </div>
-              <button
-                type="button"
-                onClick={onClose}
-                className="rounded-full bg-ink-3 p-2 text-muted"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
-            <p className="mb-2 text-[10px] font-bold uppercase tracking-wider text-muted">
-              Small · Medium · Large
-            </p>
-            <div className="grid grid-cols-3 gap-2.5">
-              {basic.map((g) => {
-                const unlockOk =
-                  highlightMinCoins != null && g.coins >= highlightMinCoins;
-                return (
-                  <button
-                    key={g.id}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void send(g)}
-                    className={`relative flex flex-col items-center gap-1 rounded-2xl border px-2 py-3 transition active:scale-95 disabled:opacity-50 ${
-                      unlockOk
-                        ? "border-amber-300/60 bg-amber-400/15"
-                        : "border-line bg-ink-3"
-                    }`}
-                  >
-                    {unlockOk ? (
-                      <span className="absolute right-1 top-1 rounded-full bg-amber-400 px-1 text-[8px] font-bold text-black">
-                        UNLOCK
-                      </span>
-                    ) : (
-                      <span className="absolute left-1 top-1 rounded-full bg-white/10 px-1 text-[8px] font-bold text-white/60">
-                        {giftTierLabel(g)}
-                      </span>
-                    )}
-                    <span className="text-2xl">{g.emoji}</span>
-                    <span className="text-xs font-semibold">{g.name}</span>
-                    <span className="text-[10px] text-gold">{g.coins} coins</span>
-                  </button>
-                );
-              })}
-            </div>
-
-            <p className="mb-2 mt-4 flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-coral">
-              <Sparkles className="h-3 w-3" /> Luxury · VIP · Legendary
-            </p>
-            <div className="grid grid-cols-3 gap-2.5">
-              {adult.map((g) => {
-                const unlockOk =
-                  highlightMinCoins != null && g.coins >= highlightMinCoins;
-                return (
-                  <button
-                    key={g.id}
-                    type="button"
-                    disabled={busy}
-                    onClick={() => void send(g)}
-                    className={`relative flex flex-col items-center gap-1 overflow-hidden rounded-2xl border px-2 py-3 transition active:scale-95 disabled:opacity-50 ${
-                      unlockOk
-                        ? "border-amber-300/60 bg-gradient-to-b from-amber-400/25 to-coral/20"
-                        : "border-coral/40 bg-gradient-to-b from-coral/20 to-ink-3"
-                    }`}
-                  >
-                    <span className="absolute right-1 top-1 rounded-full bg-coral px-1 text-[8px] font-bold text-white">
-                      {unlockOk ? "UNLOCK" : "BIG"}
-                    </span>
-                    <span className="text-2xl">{g.emoji}</span>
-                    <span className="text-center text-[11px] font-semibold leading-tight">
-                      {g.name}
-                    </span>
-                    <span className="text-[10px] font-bold text-gold">
-                      {g.coins} coins
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {sending && (
-              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-                <span className="gift-float text-5xl">{sending}</span>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => openTopUp?.(50)}
+                  className="rounded-full bg-gradient-to-r from-amber-400 to-rose-400 px-2.5 py-1 text-[10px] font-extrabold text-ink"
+                >
+                  Recharge
+                </button>
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="rounded-full bg-white/10 p-1.5 text-white/70"
+                  aria-label="Close gift box"
+                >
+                  <X className="h-4 w-4" />
+                </button>
               </div>
-            )}
+            </div>
+
+            <div className="mx-3.5 mb-2 flex shrink-0 rounded-full bg-white/8 p-0.5">
+              {(
+                [
+                  ["popular", "Popular"],
+                  ["luxury", "Luxury"],
+                ] as const
+              ).map(([key, label]) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setTab(key)}
+                  className={`relative flex-1 rounded-full py-1.5 text-center text-[11px] font-bold transition ${
+                    tab === key ? "text-ink" : "text-white/55"
+                  }`}
+                >
+                  {tab === key ? (
+                    <motion.span
+                      layoutId="gift-tab-pill"
+                      className="absolute inset-0 rounded-full bg-gradient-to-r from-amber-300 via-rose-300 to-fuchsia-400"
+                      transition={{ type: "spring", stiffness: 420, damping: 32 }}
+                    />
+                  ) : null}
+                  <span className="relative z-[1] inline-flex items-center justify-center gap-1">
+                    {key === "luxury" ? <Sparkles className="h-3 w-3" /> : null}
+                    {label}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-2 [-webkit-overflow-scrolling:touch]">
+              <div className="grid grid-cols-4 gap-1.5">
+                {shown.map((g, i) => {
+                  const unlockOk =
+                    highlightMinCoins != null && g.coins >= highlightMinCoins;
+                  return (
+                    <motion.button
+                      key={g.id}
+                      type="button"
+                      disabled={busy}
+                      initial={{ opacity: 0, y: 10, scale: 0.94 }}
+                      animate={{ opacity: 1, y: 0, scale: 1 }}
+                      transition={{ delay: Math.min(i, 8) * 0.02, duration: 0.22 }}
+                      whileTap={{ scale: 0.92 }}
+                      onClick={() => void send(g)}
+                      className={`relative flex flex-col items-center gap-0.5 rounded-xl border px-1 py-2 disabled:opacity-50 ${
+                        unlockOk
+                          ? "border-amber-300/55 bg-amber-400/15"
+                          : tab === "luxury"
+                            ? "border-rose-400/35 bg-gradient-to-b from-rose-500/20 to-white/5"
+                            : "border-white/10 bg-white/[0.06]"
+                      }`}
+                    >
+                      <span className="absolute left-0.5 top-0.5 rounded bg-black/35 px-1 text-[7px] font-bold uppercase text-white/70">
+                        {unlockOk ? "OK" : giftTierLabel(g)}
+                      </span>
+                      <span className="text-[1.65rem] leading-none drop-shadow">
+                        {g.emoji}
+                      </span>
+                      <span className="line-clamp-1 text-center text-[9px] font-semibold text-white/90">
+                        {g.name}
+                      </span>
+                      <span className="text-[9px] font-bold text-amber-300">
+                        {g.coins}
+                      </span>
+                    </motion.button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {sending ? (
+              <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+                <motion.span
+                  className="text-5xl"
+                  initial={{ scale: 0.4, opacity: 0, y: 24 }}
+                  animate={{ scale: 1.15, opacity: 1, y: -12 }}
+                  exit={{ opacity: 0 }}
+                >
+                  {sending}
+                </motion.span>
+              </div>
+            ) : null}
           </motion.div>
 
           <AnimatePresence>
-            {cinematic && (
+            {cinematic ? (
               <motion.div
-                className="pointer-events-none fixed inset-0 z-[90] flex items-center justify-center bg-black/70"
+                className="pointer-events-none fixed inset-0 z-[95] flex items-end justify-center bg-black/35 pb-[min(58dvh,460px)]"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 exit={{ opacity: 0 }}
               >
                 <motion.div
-                  className="flex flex-col items-center gap-3"
-                  initial={{ scale: 0.4, opacity: 0, y: 40 }}
+                  className="mb-4 flex flex-col items-center gap-2"
+                  initial={{ scale: 0.5, opacity: 0, y: 30 }}
                   animate={{ scale: 1, opacity: 1, y: 0 }}
-                  exit={{ scale: 1.2, opacity: 0 }}
-                  transition={{ type: "spring", stiffness: 220, damping: 16 }}
+                  exit={{ scale: 1.1, opacity: 0 }}
+                  transition={{ type: "spring", stiffness: 260, damping: 18 }}
                 >
                   <motion.span
-                    className="text-8xl drop-shadow-[0_0_40px_rgba(255,80,120,0.8)]"
-                    animate={{
-                      scale: [1, 1.15, 1],
-                      rotate: [0, -6, 6, 0],
-                    }}
-                    transition={{ duration: 1.6, repeat: 1 }}
+                    className="text-7xl drop-shadow-[0_0_28px_rgba(255,80,120,0.75)]"
+                    animate={{ scale: [1, 1.12, 1], rotate: [0, -5, 5, 0] }}
+                    transition={{ duration: 1.2 }}
                   >
                     {cinematic.emoji}
                   </motion.span>
-                  <p className="font-display text-2xl font-extrabold text-white">
-                    {cinematic.name}
-                  </p>
-                  <p className="rounded-full border border-gold/50 bg-gold/20 px-3 py-1 text-xs font-bold text-gold">
-                    Cinematic gift · {cinematic.coins} coins
+                  <p className="rounded-full border border-white/20 bg-black/55 px-3 py-1 font-display text-sm font-extrabold text-white backdrop-blur-md">
+                    {cinematic.name} · {cinematic.coins}
                   </p>
                 </motion.div>
               </motion.div>
-            )}
+            ) : null}
           </AnimatePresence>
         </>
       )}

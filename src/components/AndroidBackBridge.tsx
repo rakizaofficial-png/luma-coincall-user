@@ -2,10 +2,11 @@
 
 import { useEffect } from "react";
 import { usePathname, useRouter } from "next/navigation";
+import { popSheetCloser } from "@/lib/sheetBackStack";
 
 /**
- * Android hardware back — prefer in-app history over exiting the WebView.
- * Expo shell posts ZUKO_ANDROID_BACK; we also listen for browser popstate.
+ * Android hardware back — close sheets first, then in-app history,
+ * before exiting the WebView.
  */
 export function AndroidBackBridge() {
   const router = useRouter();
@@ -25,8 +26,10 @@ export function AndroidBackBridge() {
       pathname === "/profile";
 
     w.__ZUKO_ANDROID_BACK__ = () => {
+      if (popSheetCloser()) {
+        return true;
+      }
       if (isRoot) {
-        // Let native shell exit / minimize
         try {
           w.ReactNativeWebView?.postMessage(
             JSON.stringify({ type: "ZUKO_BACK_AT_ROOT" }),
