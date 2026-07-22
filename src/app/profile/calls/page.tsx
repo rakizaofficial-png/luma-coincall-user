@@ -8,6 +8,7 @@ import {
   formatCallDuration,
   type CallHistoryRow,
 } from "@/lib/callHistoryApi";
+import { listLivePrivateCallHistory } from "@/lib/livePrivateCall";
 import { useApp } from "@/lib/store";
 
 const PAGE_SIZE = 12;
@@ -34,7 +35,7 @@ function matchesFilter(c: CallHistoryRow, filter: Filter) {
 }
 
 export default function CallHistoryPage() {
-  const { userId, ready, coins } = useApp();
+  const { userId, displayName, ready, coins } = useApp();
   const [rows, setRows] = useState<CallHistoryRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<Filter>("all");
@@ -45,10 +46,54 @@ export default function CallHistoryPage() {
     if (!ready || !userId) return;
     setLoading(true);
     void fetchUserCallHistory(80)
-      .then((data) => setRows(data.calls || []))
-      .catch(() => setRows([]))
+      .then((data) => {
+        const local = listLivePrivateCallHistory().map(
+          (row): CallHistoryRow => ({
+            id: row.id,
+            hostId: row.hostId,
+            hostName: row.hostName,
+            userId,
+            userName: displayName || "You",
+            ratePerMinute: row.ratePerMinute,
+            billedMinutes: Math.ceil(row.durationSec / 60),
+            coinsSpent: row.coinsSpent,
+            status: row.status,
+            startedAt: row.at,
+            endedAt: row.at + row.durationSec * 1000,
+            durationSec: row.durationSec,
+            endReason: row.status,
+          }),
+        );
+        const seen = new Set(data.calls.map((c) => c.id));
+        setRows(
+          [...data.calls, ...local.filter((c) => !seen.has(c.id))].sort(
+            (a, b) => (b.startedAt || 0) - (a.startedAt || 0),
+          ),
+        );
+      })
+      .catch(() => {
+        setRows(
+          listLivePrivateCallHistory().map(
+            (row): CallHistoryRow => ({
+              id: row.id,
+              hostId: row.hostId,
+              hostName: row.hostName,
+              userId,
+              userName: displayName || "You",
+              ratePerMinute: row.ratePerMinute,
+              billedMinutes: Math.ceil(row.durationSec / 60),
+              coinsSpent: row.coinsSpent,
+              status: row.status,
+              startedAt: row.at,
+              endedAt: row.at + row.durationSec * 1000,
+              durationSec: row.durationSec,
+              endReason: row.status,
+            }),
+          ),
+        );
+      })
       .finally(() => setLoading(false));
-  }, [ready, userId, coins]);
+  }, [ready, userId, displayName, coins]);
 
   useEffect(() => {
     setPage(0);
