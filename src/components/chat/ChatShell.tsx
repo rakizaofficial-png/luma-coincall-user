@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import {
   useChatKeyboard,
   useElementHeight,
@@ -27,12 +27,36 @@ export function ChatShell({
   const { ref: headerRef, height: headerH } = useElementHeight<HTMLElement>();
   const { ref: footerRef, height: footerH } = useElementHeight<HTMLDivElement>();
   const { ref: listRef } = useElementHeight<HTMLDivElement>();
+  const wasNearBottomRef = useRef(true);
+  const didMountRef = useRef(false);
 
   useEffect(() => {
     const el = listRef.current;
     if (!el) return;
+    const updateNearBottom = () => {
+      const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+      wasNearBottomRef.current = distance <= 120;
+    };
+    updateNearBottom();
+    el.addEventListener("scroll", updateNearBottom, { passive: true });
+    return () => el.removeEventListener("scroll", updateNearBottom);
+  }, [listRef]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    if (!didMountRef.current || wasNearBottomRef.current) {
+      el.scrollTop = el.scrollHeight;
+      wasNearBottomRef.current = true;
+    }
+    didMountRef.current = true;
+  }, [scrollKey, listRef]);
+
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el || !wasNearBottomRef.current) return;
     el.scrollTop = el.scrollHeight;
-  }, [scrollKey, footerH, listRef]);
+  }, [footerH, listRef]);
 
   return (
     <div

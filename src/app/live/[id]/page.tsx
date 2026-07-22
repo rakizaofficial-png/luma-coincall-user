@@ -31,8 +31,10 @@ import {
 } from "@/lib/agora";
 import {
   bumpLiveViewers,
+  checkLiveRoomAccess,
   fetchHostOnlyLiveRoom,
   fetchLiveAgoraToken,
+  joinLiveRoomPaid,
   resolveAgoraAppId,
   type HostOnlyLiveRoom,
   type LiveComment,
@@ -45,8 +47,8 @@ import {
 } from "@/lib/liveChat";
 import {
   giftMeetsUnlock,
-  hasUnlockedLive,
   markLiveUnlocked,
+  parseRoomLocked,
   pickUnlockGift,
 } from "@/lib/liveLock";
 import { playGiftChime, playUnlockChime } from "@/lib/liveGiftSound";
@@ -130,6 +132,30 @@ export default function HostOnlyLiveRoomPage({
     room?.id && (status === "live" || status === "loading") && !needsUnlock,
   );
 
+  const checkAndApplyAccess = useCallback(
+    async (roomId: string) => {
+      try {
+        const access = await checkLiveRoomAccess(roomId, userId);
+        if (access.entryFee) {
+          setRoom((r) =>
+            r && r.id === roomId ? { ...r, unlockCoins: access.entryFee! } : r,
+          );
+        }
+        const allowed = access.allowed || access.alreadyPaid;
+        if (allowed) {
+          markLiveUnlocked(roomId, userId);
+          setUnlocked(true);
+          return true;
+        }
+      } catch {
+        /* Locked rooms remain locked until server access or join succeeds. */
+      }
+      setUnlocked(false);
+      return false;
+    },
+    [userId],
+  );
+
   const applyUnlock = useCallback(
     (gift?: Gift) => {
       if (!room) return;
@@ -164,9 +190,14 @@ export default function HostOnlyLiveRoomPage({
     };
     setRoom(roomNext);
     setStatus("live");
-    setUnlocked(hasUnlockedLive(roomNext.id, userId) || !locked);
+    if (locked) {
+      setUnlocked(false);
+      void checkAndApplyAccess(roomNext.id);
+    } else {
+      setUnlocked(true);
+    }
     return roomNext;
-  }, [id, userId, forceLock]);
+  }, [id, forceLock, checkAndApplyAccess]);
 
   // Resolve room + join Agora as viewer (video failure must NOT kill chat)
   useEffect(() => {
@@ -278,6 +309,32 @@ export default function HostOnlyLiveRoomPage({
       if (ev.type === "live:viewers" && ev.payload.roomId === room.id) {
         setRoom((r) => (r ? { ...r, viewers: ev.payload.viewers } : r));
       }
+      if (ev.type === "live:room") {
+        const p = ev.payload;
+        const rid = String(p.id || p.roomId || "");
+        const hostId = p.hostId ? String(p.hostId) : "";
+        if (!rid && !hostId) return;
+        if (rid && rid !== room.id && rid !== `live_${room.hostId}`) return;
+        if (hostId && hostId !== room.hostId) return;
+        const lock = parseRoomLocked(p);
+        setRoom((r) =>
+          r
+            ? {
+                ...r,
+                locked: lock.locked,
+                unlockCoins: lock.unlockCoins,
+                unlockGiftId: lock.unlockGiftId ?? r.unlockGiftId,
+                mode: lock.locked ? "premium" : r.mode,
+              }
+            : r,
+        );
+        if (lock.locked) {
+          setUnlocked(false);
+          void checkAndApplyAccess(room.id);
+        } else {
+          setUnlocked(true);
+        }
+      }
       if (ev.type === "live:comment") {
         const p = ev.payload;
         if (!p.comment) return;
@@ -331,6 +388,11 @@ export default function HostOnlyLiveRoomPage({
           setStatus("ended");
           void stopUserAgoraLiveViewer();
         } else {
+          if (n.locked) {
+            void checkAndApplyAccess(n.id);
+          } else {
+            setUnlocked(true);
+          }
           setRoom((r) =>
             r
               ? {
@@ -338,6 +400,9 @@ export default function HostOnlyLiveRoomPage({
                   viewers: n.viewers,
                   giftCoins: n.giftCoins,
                   title: n.title,
+                  locked: n.locked,
+                  unlockCoins: n.unlockCoins,
+                  unlockGiftId: n.unlockGiftId,
                 }
               : n,
           );
@@ -351,7 +416,7 @@ export default function HostOnlyLiveRoomPage({
       offRt();
       clearInterval(poll);
     };
-  }, [room?.id, room?.hostId, status, userId, userName, avatarUrl]);
+  }, [room?.id, room?.hostId, status, userId, userName, avatarUrl, checkAndApplyAccess]);
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -658,7 +723,19 @@ export default function HostOnlyLiveRoomPage({
     }
   };
 
-  const sendUnlockGift = async () => {
+  const isCoinShortage = (err: unknown) => {
+    const status = (err as Error & { status?: number })?.status;
+    const message = err instanceof Error ? err.message : "";
+    return status === 402 || /coin|balance|insufficient|recharge|top.?up/i.test(message);
+  };
+
+  const isLegacyJoinMissing = (err: unknown) => {
+    const status = (err as Error & { status?: number })?.status;
+    const message = err instanceof Error ? err.message : "";
+    return status === 404 || status === 405 || /not found|cannot (post|get)/i.test(message);
+  };
+
+  const sendUnlockGiftFallback = async () => {
     if (!room || unlockBusy) return;
     if (userId === room.hostId) {
       pushToast?.("Hosts cannot gift themselves!");
@@ -707,45 +784,34 @@ export default function HostOnlyLiveRoomPage({
     }
   };
 
-  const sendQuickGift = async (giftId: string) => {
-    if (!room) return;
-    if (needsUnlock) {
-      setGiftOpen(true);
-      return;
-    }
-    if (userId === room.hostId) {
-      pushToast?.("Hosts cannot gift themselves!");
-      return;
-    }
-    const g = gifts.find((x) => x.id === giftId);
-    if (!g) return;
+  const sendUnlockGift = async () => {
+    if (!room || unlockBusy) return;
+    setUnlockBusy(true);
     try {
-      const res = await fetch(`${requireApiBase()}/gifts/send`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-User-Id": userId,
-        },
-        body: JSON.stringify({
-          userId,
-          userName,
-          hostId: room.hostId,
-          giftId: g.id,
-          roomId: room.id,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Gift failed");
-      await syncWallet?.();
-      playGiftChime(g.coins);
-      if (room.locked && giftMeetsUnlock(g.coins, unlockCoins)) {
-        applyUnlock(g);
+      const access = await joinLiveRoomPaid(room.id, { userId, userName });
+      if (access.entryFee) {
+        setRoom((r) =>
+          r && r.id === room.id ? { ...r, unlockCoins: access.entryFee! } : r,
+        );
       }
-      const fid = `${Date.now()}`;
-      setFloating((f) => [...f.slice(-8), { id: fid, emoji: g.emoji }]);
-      setTimeout(() => setFloating((f) => f.filter((x) => x.id !== fid)), 1400);
+      if (!access.allowed && !access.alreadyPaid) {
+        throw new Error(access.reason || "Could not unlock live");
+      }
+      await syncWallet?.();
+      applyUnlock();
     } catch (err) {
-      pushToast?.(err instanceof Error ? err.message : "Gift failed");
+      if (isCoinShortage(err)) {
+        pushToast?.(`Need ${unlockCoins} coins to enter this Premium live`);
+        setTopUpOpen(true);
+      } else if (isLegacyJoinMissing(err)) {
+        setUnlockBusy(false);
+        await sendUnlockGiftFallback();
+        return;
+      } else {
+        pushToast?.(err instanceof Error ? err.message : "Could not unlock live");
+      }
+    } finally {
+      setUnlockBusy(false);
     }
   };
 
@@ -810,10 +876,10 @@ export default function HostOnlyLiveRoomPage({
               className="h-9 w-9 rounded-full object-cover ring-2 ring-amber-300/70"
             />
             <div className="min-w-0">
-              <p className="truncate text-sm font-bold leading-tight text-white">
+              <p className="truncate text-sm font-bold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
                 {room?.hostName || "Host"}
               </p>
-              <p className="text-[10px] font-semibold text-rose-300">
+              <p className="text-[10px] font-semibold text-rose-300 drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
                 {needsUnlock
                   ? "🔒 PREMIUM"
                   : status === "live"
@@ -837,7 +903,7 @@ export default function HostOnlyLiveRoomPage({
 
           <div className="flex items-center gap-2">
             <div className="flex items-center gap-1 rounded-full border border-white/20 bg-black/35 px-2 py-1 shadow-lg backdrop-blur-md">
-              <span className="text-xs font-bold tabular-nums text-white">
+              <span className="text-xs font-bold tabular-nums text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.8)]">
                 👁 {room?.viewers?.toLocaleString() || "0"}
               </span>
             </div>
@@ -868,10 +934,10 @@ export default function HostOnlyLiveRoomPage({
             onClick={() => setTopUpOpen(true)}
             className="w-[58px] overflow-hidden rounded-xl bg-gradient-to-b from-rose-500 to-red-700 px-1 py-1.5 text-center shadow-lg"
           >
-            <p className="text-[8px] font-extrabold leading-tight text-amber-200">
+            <p className="text-[8px] font-extrabold leading-tight text-amber-200 drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)]">
               DRAGON
             </p>
-            <p className="text-[9px] font-bold text-white">COINS</p>
+            <p className="text-[9px] font-bold text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)]">COINS</p>
           </button>
           <button
             type="button"
@@ -884,7 +950,7 @@ export default function HostOnlyLiveRoomPage({
             <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold text-white">
               3
             </span>
-            <span className="mt-1 text-[9px] font-bold tabular-nums text-white/90">
+            <span className="mt-1 rounded-full bg-black/30 px-1.5 text-[9px] font-bold tabular-nums text-white/90 backdrop-blur-sm drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)]">
               {formatTimer(giftTimer)}
             </span>
           </button>
@@ -908,7 +974,7 @@ export default function HostOnlyLiveRoomPage({
                 <span className="absolute inset-0 animate-ping rounded-full bg-cyan-300/30" />
                 <Video className="relative h-6 w-6" strokeWidth={2.4} />
               </span>
-              <span className="mt-1 text-[9px] font-extrabold uppercase tracking-wide text-cyan-100">
+              <span className="mt-1 rounded-full bg-black/30 px-1.5 text-[9px] font-extrabold uppercase tracking-wide text-cyan-100 backdrop-blur-sm drop-shadow-[0_1px_3px_rgba(0,0,0,0.85)]">
                 Call
               </span>
             </button>

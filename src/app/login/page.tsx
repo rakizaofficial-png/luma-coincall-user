@@ -8,7 +8,7 @@ import {
   AuthPrimaryButton,
   AuthShell,
 } from "@/components/auth/AuthShell";
-import { loginAccount } from "@/lib/authSession";
+import { loginWithPassword } from "@/lib/authSession";
 import { useApp } from "@/lib/store";
 
 export default function LoginPage() {
@@ -21,11 +21,9 @@ export default function LoginPage() {
   const submit = async () => {
     setLoading(true);
     try {
-      const res = await loginAccount({ email, password });
-      pushToast("OTP sent — verify to continue");
-      const q = new URLSearchParams({ email: res.email });
-      if (res.demoCode) q.set("demo", res.demoCode);
-      router.push(`/otp?${q.toString()}`);
+      await loginWithPassword({ email, password });
+      pushToast("Welcome back");
+      router.push("/");
     } catch (e: unknown) {
       pushToast(e instanceof Error ? e.message : "Login failed");
     } finally {
@@ -38,9 +36,17 @@ export default function LoginPage() {
       title="Sign in"
       subtitle="Secure login for your Zuko wallet, calls, and VIP."
       footer={
-        <Link href="/forgot-password" className="font-bold text-coral">
-          Forgot password?
-        </Link>
+        <div className="space-y-2">
+          <p>
+            New here?{" "}
+            <Link href="/register" className="font-bold text-coral">
+              Create an account
+            </Link>
+          </p>
+          <Link href="/forgot-password" className="font-bold text-coral">
+            Forgot password?
+          </Link>
+        </div>
       }
     >
       <AuthField
@@ -59,11 +65,8 @@ export default function LoginPage() {
         onChange={setPassword}
         placeholder="••••••••"
       />
-      <div className="flex justify-end">
-        <span className="text-[11px] text-muted">OTP required after password</span>
-      </div>
       <AuthPrimaryButton loading={loading} onClick={() => void submit()}>
-        Continue to OTP
+        Sign in
       </AuthPrimaryButton>
     </AuthShell>
   );

@@ -33,6 +33,13 @@ export type LiveComment = {
   giftCoins?: number;
 };
 
+export type LiveRoomAccess = {
+  allowed: boolean;
+  alreadyPaid?: boolean;
+  entryFee?: number;
+  reason?: string;
+};
+
 function mapRoom(
   r: Record<string, unknown>,
   extras?: { channel?: string; giftCoins?: number; viewers?: number },
@@ -150,6 +157,60 @@ export async function fetchHostOnlyLiveRoom(
     /* ignore */
   }
   return null;
+}
+
+export async function checkLiveRoomAccess(
+  roomId: string,
+  userId: string,
+): Promise<LiveRoomAccess> {
+  const qs = new URLSearchParams({ userId });
+  const res = await fetch(
+    `${requireApiBase()}/live/rooms/${encodeURIComponent(roomId)}/access?${qs}`,
+    {
+      cache: "no-store",
+      headers: { "X-User-Id": userId },
+    },
+  );
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    throw new Error(String(data.error || data.message || "Access check failed"));
+  }
+  return {
+    allowed: Boolean(data.allowed ?? data.hasAccess ?? data.alreadyPaid),
+    alreadyPaid: Boolean(data.alreadyPaid ?? data.paid),
+    entryFee: Number(data.entryFee ?? data.unlockCoins ?? 0) || undefined,
+    reason: data.reason ? String(data.reason) : undefined,
+  };
+}
+
+export async function joinLiveRoomPaid(
+  roomId: string,
+  input: { userId: string; userName: string },
+): Promise<LiveRoomAccess> {
+  const res = await fetch(
+    `${requireApiBase()}/live/rooms/${encodeURIComponent(roomId)}/join`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-User-Id": input.userId,
+      },
+      body: JSON.stringify(input),
+    },
+  );
+  const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (!res.ok) {
+    const message = String(data.error || data.message || "Could not unlock live");
+    const err = new Error(message);
+    (err as Error & { status?: number }).status = res.status;
+    throw err;
+  }
+  return {
+    allowed: Boolean(data.allowed ?? data.joined ?? data.alreadyPaid ?? true),
+    alreadyPaid: Boolean(data.alreadyPaid ?? data.paid),
+    entryFee: Number(data.entryFee ?? data.unlockCoins ?? 0) || undefined,
+    reason: data.reason ? String(data.reason) : undefined,
+  };
 }
 
 export async function fetchLiveAgoraToken(channel: string, uid: number) {

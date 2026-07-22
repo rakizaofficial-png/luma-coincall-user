@@ -211,96 +211,40 @@ export const threads: ChatThread[] = [
   },
 ];
 
+function giftTierByCoins(coins: number): Gift["tier"] {
+  if (coins >= 5000) return "legendary";
+  if (coins >= 1000) return "vip";
+  if (coins >= 250) return "luxury";
+  if (coins >= 100) return "large";
+  if (coins >= 40) return "medium";
+  return "small";
+}
+
 export const gifts: Gift[] = [
-  // Small
-  { id: "rose", name: "Rose", emoji: "🌹", coins: 1, tier: "small" },
-  { id: "heart", name: "Heart", emoji: "💖", coins: 5, tier: "small" },
-  { id: "kiss", name: "Kiss", emoji: "💋", coins: 10, tier: "small" },
-  { id: "candy", name: "Candy", emoji: "🍬", coins: 15, tier: "small" },
-  { id: "star", name: "Star", emoji: "⭐", coins: 20, tier: "small" },
-  { id: "coffee", name: "Coffee", emoji: "☕", coins: 30, tier: "small" },
-  // Medium
-  { id: "balloon", name: "Balloon", emoji: "🎈", coins: 49, tier: "medium" },
-  { id: "icecream", name: "Ice Cream", emoji: "🍦", coins: 69, tier: "medium" },
-  { id: "teddy", name: "Teddy", emoji: "🧸", coins: 89, tier: "medium" },
-  { id: "diamond", name: "Diamond", emoji: "💎", coins: 99, tier: "medium" },
-  { id: "perfume", name: "Perfume", emoji: "🧴", coins: 129, tier: "medium" },
-  { id: "crown", name: "Crown", emoji: "👑", coins: 199, tier: "large" },
-  // Large
-  { id: "ring", name: "Ring", emoji: "💍", coins: 249, tier: "large" },
-  { id: "car", name: "Sports Car", emoji: "🏎️", coins: 399, tier: "large" },
-  { id: "yacht", name: "Yacht", emoji: "🛥️", coins: 599, tier: "large" },
-  // Luxury / cinematic
-  {
-    id: "silk_touch",
-    name: "Silk Touch",
-    emoji: "👙",
-    coins: 299,
-    tier: "luxury",
-    adult: true,
-  },
-  {
-    id: "velvet_night",
-    name: "Velvet Night",
-    emoji: "🔥",
-    coins: 499,
-    tier: "luxury",
-    adult: true,
-  },
-  {
-    id: "private_dance",
-    name: "Private Dance",
-    emoji: "💃",
-    coins: 799,
-    tier: "vip",
-    adult: true,
-  },
-  {
-    id: "cinematic_kiss",
-    name: "Cinematic Kiss",
-    emoji: "😘",
-    coins: 999,
-    tier: "vip",
-    adult: true,
-  },
-  {
-    id: "castle",
-    name: "Magic Castle",
-    emoji: "🏰",
-    coins: 1499,
-    tier: "vip",
-  },
-  {
-    id: "royal_fantasy",
-    name: "Royal Fantasy",
-    emoji: "👸",
-    coins: 1999,
-    tier: "legendary",
-    adult: true,
-  },
-  {
-    id: "galaxy",
-    name: "Galaxy Love",
-    emoji: "🌌",
-    coins: 2999,
-    tier: "legendary",
-  },
-  {
-    id: "ultimate_desire",
-    name: "Ultimate Desire",
-    emoji: "✨",
-    coins: 4999,
-    tier: "legendary",
-    adult: true,
-  },
-  {
-    id: "phoenix",
-    name: "Phoenix Rise",
-    emoji: "🔥",
-    coins: 9999,
-    tier: "legendary",
-  },
-];
+  { id: "rose_bouquet", name: "Rose Bouquet", emoji: "💐", coins: 10 },
+  { id: "luxury_perfume", name: "Luxury Perfume", emoji: "🧴", coins: 50 },
+  { id: "neon_heart", name: "Neon Heart", emoji: "💖", coins: 99 },
+  { id: "golden_butterfly", name: "Golden Butterfly", emoji: "🦋", coins: 199 },
+  { id: "diamond_ring", name: "Diamond Ring", emoji: "💍", coins: 299 },
+  { id: "vip_champagne", name: "VIP Champagne", emoji: "🍾", coins: 399 },
+  { id: "luxury_watch", name: "Luxury Watch", emoji: "⌚", coins: 599 },
+  { id: "luxury_handbag", name: "Luxury Handbag", emoji: "👜", coins: 799 },
+  { id: "fireworks", name: "Fireworks", emoji: "🎆", coins: 999 },
+  { id: "sports_car", name: "Sports Car", emoji: "🏎️", coins: 1299 },
+  { id: "super_bike", name: "Super Bike", emoji: "🏍️", coins: 1599 },
+  { id: "diamond_crown", name: "Diamond Crown", emoji: "👑", coins: 1999 },
+  { id: "red_carpet", name: "Red Carpet", emoji: "🎬", coins: 2499 },
+  { id: "fashion_collection", name: "Fashion Collection", emoji: "👗", coins: 2999 },
+  { id: "private_jet", name: "Private Jet", emoji: "🛩️", coins: 4999 },
+  { id: "luxury_yacht", name: "Luxury Yacht", emoji: "🛥️", coins: 6999 },
+  { id: "royal_castle", name: "Royal Castle", emoji: "🏰", coins: 9999 },
+  { id: "golden_throne", name: "Golden Throne", emoji: "🪑", coins: 12999 },
+  { id: "diamond_rain", name: "Diamond Rain", emoji: "💎", coins: 15999 },
+  { id: "millionaire_box", name: "Millionaire Box", emoji: "💰", coins: 19999 },
+].map((gift) => ({
+  ...gift,
+  tier: giftTierByCoins(gift.coins),
+}));
 
 export const giftTickerLines = [
   "User492 just gifted a Magic Castle to Aisha!",

@@ -47,19 +47,31 @@ export function parseRoomLocked(raw: Record<string, unknown>): {
   unlockCoins: number;
   unlockGiftId?: string;
 } {
-  const locked = Boolean(
-    raw.isLocked ||
-      raw.locked ||
-      raw.isPremium ||
-      raw.premium ||
-      raw.premiumLive ||
-      raw.mode === "premium" ||
-      raw.mode === "locked",
-  );
+  const boolish = (value: unknown) =>
+    value === true ||
+    value === 1 ||
+    value === "1" ||
+    String(value).toLowerCase() === "true";
   const unlockCoins = Math.max(
     1,
-    Number(raw.unlockCoins ?? raw.lockPrice ?? raw.premiumPrice ?? DEFAULT_UNLOCK_COINS) ||
-      DEFAULT_UNLOCK_COINS,
+    Number(
+      raw.entryFee ??
+        raw.unlockCoins ??
+        raw.lockPrice ??
+        raw.premiumPrice ??
+        DEFAULT_UNLOCK_COINS,
+    ) || DEFAULT_UNLOCK_COINS,
+  );
+  const locked = Boolean(
+    boolish(raw.entryLocked) ||
+      boolish(raw.isLocked) ||
+      boolish(raw.locked) ||
+      boolish(raw.isPremium) ||
+      boolish(raw.premium) ||
+      boolish(raw.premiumLive) ||
+      raw.mode === "premium" ||
+      raw.mode === "locked" ||
+      Number(raw.entryFee || 0) > 0,
   );
   const unlockGiftId = raw.unlockGiftId
     ? String(raw.unlockGiftId)

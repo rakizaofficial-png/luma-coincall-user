@@ -41,12 +41,13 @@ export function PremiumLiveLockOverlay({
           <Crown className="h-5 w-5 text-amber-300" />
         </p>
         <p className="mt-2 text-sm text-white/75">
-          {hostName} locked this stream. Send a gift to unlock HD video & chat.
+          {hostName} locked this stream. Enter for {unlockCoins} coins to unlock
+          HD video & chat.
         </p>
         <p className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-semibold text-white/85">
           <Sparkles className="h-3 w-3 text-amber-300" />
-          Unlock gift · {unlockGift.emoji} {unlockGift.name} · {unlockCoins}+{" "}
-          coins
+          Entry price · {unlockCoins} coins · gift fallback {unlockGift.emoji}{" "}
+          {unlockGift.name}
         </p>
         <button
           type="button"
@@ -57,7 +58,7 @@ export function PremiumLiveLockOverlay({
           {busy ? "Unlocking…" : "Unlock"}
         </button>
         <p className="mt-3 text-[10px] text-white/45">
-          Coins are deducted · one gift unlocks this live for you
+          Server-verified entry · coins are deducted once per live
         </p>
       </motion.div>
     </motion.div>

@@ -121,7 +121,7 @@ function makeOtpCode(): string {
   return String(100000 + Math.floor(Math.random() * 900000));
 }
 
-export type OtpPurpose = "register" | "login" | "reset";
+export type OtpPurpose = "reset";
 
 export async function startOtp(input: {
   email: string;
@@ -175,20 +175,7 @@ export async function verifyOtp(input: {
   const users = readUsers();
   let user = users.find((u) => u.email === pending.email);
 
-  if (pending.purpose === "register") {
-    if (user) throw new Error("Email already registered");
-    if (!pending.passwordHash) throw new Error("Registration incomplete");
-    user = {
-      id: `usr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
-      email: pending.email,
-      name: pending.name || "Zuko Fan",
-      createdAt: Date.now(),
-      passwordHash: pending.passwordHash,
-    };
-    writeUsers([user, ...users]);
-  } else if (pending.purpose === "login") {
-    if (!user) throw new Error("Account not found");
-  } else if (pending.purpose === "reset") {
+  if (pending.purpose === "reset") {
     if (!user) throw new Error("Account not found");
     if (!pending.passwordHash) throw new Error("Set a new password first");
     const idx = users.findIndex((u) => u.email === pending.email);
@@ -210,8 +197,23 @@ export async function registerAccount(input: {
   email: string;
   password: string;
   name: string;
-}): Promise<{ email: string; demoCode?: string }> {
+}): Promise<AuthSession> {
+  return registerWithPassword(input);
+}
+
+export async function registerWithPassword(input: {
+  email: string;
+  password: string;
+  name: string;
+}): Promise<AuthSession> {
   const email = input.email.trim().toLowerCase();
+  const name = input.name.trim();
+  if (!name) {
+    throw new Error("Enter your name");
+  }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Enter a valid email");
+  }
   if (input.password.length < 6) {
     throw new Error("Password must be at least 6 characters");
   }
@@ -219,25 +221,45 @@ export async function registerAccount(input: {
   if (users.some((u) => u.email === email)) {
     throw new Error("Email already registered");
   }
-  return startOtp({
+  const user: StoredUser = {
+    id: `usr_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`,
     email,
-    purpose: "register",
-    name: input.name,
-    password: input.password,
+    name,
+    createdAt: Date.now(),
+    passwordHash: hashPassword(input.password),
+  };
+  writeUsers([user, ...users]);
+  return issueSession({
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    createdAt: user.createdAt,
   });
 }
 
 export async function loginAccount(input: {
   email: string;
   password: string;
-}): Promise<{ email: string; demoCode?: string }> {
+}): Promise<AuthSession> {
+  return loginWithPassword(input);
+}
+
+export async function loginWithPassword(input: {
+  email: string;
+  password: string;
+}): Promise<AuthSession> {
   const email = input.email.trim().toLowerCase();
   const users = readUsers();
   const hit = users.find((u) => u.email === email);
   if (!hit || hit.passwordHash !== hashPassword(input.password)) {
     throw new Error("Invalid email or password");
   }
-  return startOtp({ email, purpose: "login" });
+  return issueSession({
+    id: hit.id,
+    email: hit.email,
+    name: hit.name,
+    createdAt: hit.createdAt,
+  });
 }
 
 export async function requestPasswordReset(email: string): Promise<{

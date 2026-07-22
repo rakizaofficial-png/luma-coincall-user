@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Sparkles, X } from "lucide-react";
 import { gifts, type Gift } from "@/lib/data";
+import { fetchGiftCatalog } from "@/lib/giftCatalog";
 import { useApp } from "@/lib/store";
 import { getDeviceUserId } from "@/lib/walletApi";
 import { requireApiBase } from "@/config/apiConfig";
@@ -61,9 +62,21 @@ export function GiftSheet({
   const [sending, setSending] = useState<string | null>(null);
   const [cinematic, setCinematic] = useState<Gift | null>(null);
   const [busy, setBusy] = useState(false);
+  const [catalog, setCatalog] = useState<Gift[]>(gifts);
 
-  const basic = gifts.filter((g) => !isCinematic(g));
-  const adult = gifts.filter((g) => isCinematic(g));
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    void fetchGiftCatalog().then((next) => {
+      if (active) setCatalog(next);
+    });
+    return () => {
+      active = false;
+    };
+  }, [open]);
+
+  const basic = catalog.filter((g) => !isCinematic(g));
+  const adult = catalog.filter((g) => isCinematic(g));
 
   const send = async (g: Gift) => {
     if (busy) return;
