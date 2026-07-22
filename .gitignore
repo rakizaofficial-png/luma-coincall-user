@@ -51,4 +51,9 @@ expo-app/android/
 expo-app/ios/
 *.apk
 expo-app/dist/
+CoinCall
 CoinCall/
+
+# Host app clone (symlink or dir)
+/CoinCall
+/CoinCall/**
