@@ -33,6 +33,7 @@ import {
   formatCallDuration,
   type CallHistoryRow,
 } from "@/lib/callHistoryApi";
+import { listLivePrivateCallHistory } from "@/lib/livePrivateCall";
 import {
   fetchCoinCatalog,
   fetchWalletHistory,
@@ -150,9 +151,52 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!ready || !userId) return;
     void fetchUserCallHistory(40)
-      .then((data) => setCallHistory(data.calls))
-      .catch(() => setCallHistory([]));
-  }, [ready, userId, coins]);
+      .then((data) => {
+        const local = listLivePrivateCallHistory().map(
+          (row): CallHistoryRow => ({
+            id: row.id,
+            hostId: row.hostId,
+            hostName: row.hostName,
+            userId,
+            userName: displayName || "You",
+            ratePerMinute: row.ratePerMinute,
+            billedMinutes: Math.ceil(row.durationSec / 60),
+            coinsSpent: row.coinsSpent,
+            status: row.status,
+            startedAt: row.at,
+            endedAt: row.at + row.durationSec * 1000,
+            durationSec: row.durationSec,
+            endReason: row.status,
+          }),
+        );
+        const seen = new Set(data.calls.map((c) => c.id));
+        const merged = [
+          ...data.calls,
+          ...local.filter((c) => !seen.has(c.id)),
+        ].sort((a, b) => (b.startedAt || 0) - (a.startedAt || 0));
+        setCallHistory(merged.slice(0, 60));
+      })
+      .catch(() => {
+        const local = listLivePrivateCallHistory().map(
+          (row): CallHistoryRow => ({
+            id: row.id,
+            hostId: row.hostId,
+            hostName: row.hostName,
+            userId,
+            userName: displayName || "You",
+            ratePerMinute: row.ratePerMinute,
+            billedMinutes: Math.ceil(row.durationSec / 60),
+            coinsSpent: row.coinsSpent,
+            status: row.status,
+            startedAt: row.at,
+            endedAt: row.at + row.durationSec * 1000,
+            durationSec: row.durationSec,
+            endReason: row.status,
+          }),
+        );
+        setCallHistory(local);
+      });
+  }, [ready, userId, coins, displayName]);
 
   const pack = products.find((p) => p.productId === selected) || products[0];
 

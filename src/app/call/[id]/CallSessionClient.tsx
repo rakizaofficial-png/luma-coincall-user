@@ -40,6 +40,7 @@ import {
 import { transferCallMinuteFb } from "@/lib/firebaseWallet";
 import { isFirebaseReady } from "@/lib/firebase";
 import { effectiveRate, maxCallMinutes } from "@/lib/ledger";
+import { saveLivePrivateCallHistory } from "@/lib/livePrivateCall";
 import { useApp } from "@/lib/store";
 import { getDeviceUserId } from "@/lib/walletApi";
 
@@ -62,6 +63,9 @@ export default function CallSessionClient({
   const isBlur = search.get("blur") === "1";
   const trialParam = search.get("trial") === "1";
   const audioOnly = search.get("audio") === "1";
+  const preAcceptedCallId = search.get("acceptedCall");
+  const fromLive = search.get("fromLive") === "1";
+  const reservedFirstMinute = search.get("reserved") === "1";
   const {
     spendAsync,
     pushToast,
@@ -91,12 +95,17 @@ export default function CallSessionClient({
   const [lowBalanceOpen, setLowBalanceOpen] = useState(false);
   const [deductFlash, setDeductFlash] = useState<number | null>(null);
   const [feed, setFeed] = useState<FeedLine[]>([]);
+  const [showConnectedBanner, setShowConnectedBanner] = useState(false);
+  const [endingOverlay, setEndingOverlay] = useState(false);
+  const [coinsSpentUi, setCoinsSpentUi] = useState(0);
   const hangUpRef = useRef<() => Promise<void>>(async () => undefined);
   const trialEndedRef = useRef(false);
   const billingPausedRef = useRef(false);
   const billingBusyRef = useRef(false);
   const lowBalanceWarnedRef = useRef(false);
   const lowBalance60WarnedRef = useRef(false);
+  const coinsSpentRef = useRef(0);
+  const historySavedRef = useRef(false);
   const openTopUpRef = useRef(openTopUp);
   openTopUpRef.current = openTopUp;
   const feedEndRef = useRef<HTMLDivElement>(null);
@@ -159,13 +168,20 @@ export default function CallSessionClient({
     enabled: true,
     preferLiveBridge,
     audioOnly,
+    preAcceptedCallId,
     onConnected: ({ transport, name }) => {
       pushFeedRef.current(`Connected with ${name}`, "system");
       pushToastRef.current(
         transport === "ai_prerecorded"
           ? `${name} · preview host (AI clip) while live hosts are busy`
-          : `You’re live with ${name}`,
+          : fromLive
+            ? `Private call with ${name} · live`
+            : `You’re live with ${name}`,
       );
+      if (fromLive) {
+        setShowConnectedBanner(true);
+        setTimeout(() => setShowConnectedBanner(false), 2200);
+      }
     },
     onFailed: (message) => {
       pushToastRef.current(message);
@@ -235,12 +251,29 @@ export default function CallSessionClient({
       : rate;
 
   const hangUp = async () => {
+    setEndingOverlay(true);
     // Status → ended first so BOTH sides leave via RTDB listener
     await disconnect({ reason: "user_hangup" });
     await stopUserAgoraCall();
     if (isConnected) void completeCallEngagement();
+    if (fromLive && !historySavedRef.current) {
+      historySavedRef.current = true;
+      saveLivePrivateCallHistory({
+        id: bridgeCall?.id || sessionId || `live_end_${Date.now()}`,
+        hostId: liveHost?.id || bridgeCall?.hostId || id,
+        hostName: displayName,
+        at: Date.now(),
+        durationSec: secsRef.current,
+        coinsSpent: coinsSpentRef.current,
+        status: coinsSpentRef.current > 0 && coinsRef.current < chargeRateRef.current
+          ? "insufficient"
+          : "ended",
+        ratePerMinute: chargeRateRef.current || chargeRate,
+      });
+    }
     pushToast("Call ended");
-    router.push("/call");
+    await new Promise((r) => setTimeout(r, 480));
+    router.push(fromLive ? "/live" : "/call");
   };
 
   useEffect(() => {
@@ -260,6 +293,19 @@ export default function CallSessionClient({
   useEffect(() => {
     chargeRateRef.current = chargeRate;
   }, [chargeRate]);
+
+  // Live→call reserved the first minute already — reflect spend + sync wallet
+  useEffect(() => {
+    if (!isConnected || !reservedFirstMinute || chargeRate <= 0) return;
+    if (coinsSpentRef.current < chargeRate) {
+      coinsSpentRef.current = chargeRate;
+      setCoinsSpentUi(chargeRate);
+      setDeductFlash(chargeRate);
+      setTimeout(() => setDeductFlash(null), 900);
+      pushFeed(`−${chargeRate} coins · 1st min reserved`, "bill");
+    }
+    void syncWallet?.();
+  }, [isConnected, reservedFirstMinute, chargeRate, syncWallet]);
 
   useEffect(() => {
     if (maxCallMinutes(coins, chargeRate) > 1) {
@@ -371,6 +417,8 @@ export default function CallSessionClient({
             });
 
             const onMinuteBilled = (amt: number, nextBal?: number) => {
+              coinsSpentRef.current += amt;
+              setCoinsSpentUi(coinsSpentRef.current);
               setDeductFlash(amt);
               setTimeout(() => setDeductFlash(null), 900);
               pushFeed(`−${amt} coins · 1 min`, "bill");
@@ -475,9 +523,9 @@ export default function CallSessionClient({
   useEffect(() => {
     if (state === "DISCONNECTED") {
       void stopUserAgoraCall();
-      router.push("/call");
+      router.push(fromLive ? "/live" : "/call");
     }
-  }, [state, router]);
+  }, [state, router, fromLive]);
 
   useEffect(() => {
     feedEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -513,6 +561,7 @@ export default function CallSessionClient({
       {isRinging && (
         <div className="absolute inset-0 z-[1] flex flex-col items-center justify-center bg-gradient-to-b from-black via-black/80 to-[#1a0a14]/90">
           <span className="absolute h-36 w-36 animate-ping rounded-full bg-rose-500/20" />
+          <span className="absolute h-52 w-52 animate-pulse rounded-full border border-cyan-400/20" />
           <HostAvatarImg
             src={displayAvatar}
             hostId={id}
@@ -524,11 +573,41 @@ export default function CallSessionClient({
             {displayName}
           </p>
           <p className="mt-2 animate-pulse text-sm font-semibold text-cyan-300">
-            Connecting…
+            {fromLive || preAcceptedCallId ? "Connecting private call…" : "Connecting…"}
           </p>
           <p className="mt-1 text-xs text-white/60">{statusText}</p>
         </div>
       )}
+
+      <AnimatePresence>
+        {showConnectedBanner ? (
+          <motion.div
+            initial={{ opacity: 0, y: -12, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -8 }}
+            className="pointer-events-none absolute inset-x-0 top-[18%] z-30 flex justify-center px-4"
+          >
+            <div className="rounded-full border border-emerald-300/40 bg-emerald-500/20 px-4 py-2 text-sm font-bold text-emerald-100 shadow-lg backdrop-blur-md">
+              Connected · private video live
+            </div>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {endingOverlay ? (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          >
+            <p className="font-display text-xl font-extrabold text-white">
+              Ending call…
+            </p>
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {/* Edge-to-edge remote video */}
       <div
@@ -603,9 +682,16 @@ export default function CallSessionClient({
               <span className="text-[10px] font-bold text-amber-100 drop-shadow">
                 {trialMode
                   ? "Complimentary"
-                  : `${rate}/min · ${coins} left`}
+                  : `${chargeRate}/min · ${coins} left`}
               </span>
             </div>
+            {!trialMode ? (
+              <div className="rounded-full border border-white/15 bg-white/10 px-2.5 py-1 backdrop-blur-xl">
+                <span className="text-[10px] font-bold text-white/80">
+                  Used {coinsSpentUi}
+                </span>
+              </div>
+            ) : null}
           </div>
         </div>
       </header>
