@@ -27,6 +27,17 @@ import {
   initialWindowMetrics,
 } from "react-native-safe-area-context";
 import { WebView, type WebViewNavigation } from "react-native-webview";
+import {
+  endConnection,
+  finishTransaction,
+  getAvailablePurchases,
+  getProducts,
+  initConnection,
+  purchaseErrorListener,
+  purchaseUpdatedListener,
+  requestPurchase,
+  type Purchase,
+} from "react-native-iap";
 
 /**
  * Fail-safe Expo shell — loads Zuko web app in a WebView.
@@ -51,6 +62,16 @@ const APP_URL = resolveAppUrl(RAW_APP_URL);
 const TRANSIENT_HTTP = new Set([502, 503, 504]);
 const MAX_AUTO_RETRIES = 4;
 const INSTALL_FILE = `${FileSystem.documentDirectory || ""}zuko_install_id.txt`;
+const IAP_PRODUCT_IDS = [
+  "luma_coins_50",
+  "luma_coins_100",
+  "luma_coins_250",
+  "luma_coins_500",
+  "luma_coins_1000",
+  "luma_coins_2000",
+  "luma_coins_5000",
+  "luma_coins_10000",
+];
 
 async function loadOrCreateInstallId(): Promise<string> {
   try {
@@ -138,6 +159,180 @@ function ZukoWebShell() {
   const firstLoadDone = useRef(false);
   const webRef = useRef<WebView>(null);
   const canGoBackRef = useRef(false);
+  const iapReadyRef = useRef(false);
+  const availableIapProductsRef = useRef<Set<string>>(new Set());
+  const pendingPurchasesRef = useRef<Map<string, Purchase>>(new Map());
+
+  const injectIapResult = useCallback(
+    (
+      callbackName: "__ZUKO_IAP_CB__" | "__ZUKO_IAP_RESTORE_CB__",
+      method: "resolve" | "reject",
+      value: unknown,
+    ) => {
+      webRef.current?.injectJavaScript(`
+(function(){
+  try {
+    var callbackName = ${JSON.stringify(callbackName)};
+    var callback = window[callbackName];
+    if (callback && callback.${method}) callback.${method}(${JSON.stringify(value)});
+    window[callbackName] = null;
+  } catch (e) {}
+  true;
+})();
+true;`);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (Platform.OS !== "android") return;
+
+    let cancelled = false;
+    let purchaseSub: { remove: () => void } | undefined;
+    let errorSub: { remove: () => void } | undefined;
+
+    const connect = async () => {
+      try {
+        await initConnection();
+        if (cancelled) return;
+
+        purchaseSub = purchaseUpdatedListener((purchase) => {
+          const purchaseToken = purchase.purchaseToken;
+          if (!purchaseToken) {
+            injectIapResult(
+              "__ZUKO_IAP_CB__",
+              "reject",
+              "Google Play did not return a purchase token.",
+            );
+            return;
+          }
+          pendingPurchasesRef.current.set(purchaseToken, purchase);
+          injectIapResult("__ZUKO_IAP_CB__", "resolve", {
+            platform: "google",
+            productId: purchase.productId,
+            purchaseToken,
+            transactionId: purchase.transactionId,
+          });
+        });
+
+        errorSub = purchaseErrorListener((error) => {
+          injectIapResult(
+            "__ZUKO_IAP_CB__",
+            "reject",
+            error.message || "Google Play purchase failed.",
+          );
+        });
+
+        const products = await getProducts({ skus: IAP_PRODUCT_IDS });
+        availableIapProductsRef.current = new Set(
+          products.map((product) => product.productId),
+        );
+        iapReadyRef.current = true;
+      } catch (error) {
+        iapReadyRef.current = false;
+        console.warn("Google Play Billing connection failed", error);
+      }
+    };
+
+    void connect();
+    return () => {
+      cancelled = true;
+      iapReadyRef.current = false;
+      availableIapProductsRef.current.clear();
+      purchaseSub?.remove();
+      errorSub?.remove();
+      void endConnection();
+    };
+  }, [injectIapResult]);
+
+  const handleIapMessage = useCallback(
+    async (data: {
+      type?: string;
+      sku?: string;
+      purchaseToken?: string;
+    }) => {
+      try {
+        if (!iapReadyRef.current) {
+          throw new Error(
+            "Google Play Billing is not ready. Close and reopen the app, then try again.",
+          );
+        }
+
+        if (data.type === "ZUKO_IAP_PURCHASE") {
+          const productId = String(data.sku || "").trim();
+          if (!IAP_PRODUCT_IDS.includes(productId)) {
+            throw new Error(`Unknown Google Play product: ${productId}`);
+          }
+
+          // Refresh this SKU immediately before checkout. This prevents a stale
+          // startup query from turning a valid Play product into an opaque
+          // "unknown product" failure.
+          const products = await getProducts({ skus: [productId] });
+          for (const product of products) {
+            availableIapProductsRef.current.add(product.productId);
+          }
+          if (!availableIapProductsRef.current.has(productId)) {
+            throw new Error(
+              `Google Play product ${productId} is unavailable. Install Zuko from the Play internal test track, sign in with an approved tester account, and make sure this product is active in Play Console.`,
+            );
+          }
+          await requestPurchase({ skus: [productId] });
+          return;
+        }
+
+        if (data.type === "ZUKO_IAP_RESTORE") {
+          const purchases = await getAvailablePurchases();
+          const restorable = purchases
+            .filter((purchase) => Boolean(purchase.purchaseToken))
+            .map((purchase) => {
+              pendingPurchasesRef.current.set(
+                purchase.purchaseToken!,
+                purchase,
+              );
+              return {
+                platform: "google",
+                productId: purchase.productId,
+                purchaseToken: purchase.purchaseToken!,
+                transactionId: purchase.transactionId,
+              };
+            });
+          injectIapResult(
+            "__ZUKO_IAP_RESTORE_CB__",
+            "resolve",
+            restorable,
+          );
+          return;
+        }
+
+        if (data.type === "ZUKO_IAP_FINISH") {
+          const purchaseToken = String(data.purchaseToken || "");
+          let purchase = pendingPurchasesRef.current.get(purchaseToken);
+          if (!purchase) {
+            const purchases = await getAvailablePurchases();
+            purchase = purchases.find(
+              (item) => item.purchaseToken === purchaseToken,
+            );
+          }
+          if (!purchase) {
+            throw new Error("Verified purchase was not found on this device.");
+          }
+          await finishTransaction({ purchase, isConsumable: true });
+          pendingPurchasesRef.current.delete(purchaseToken);
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Google Play Billing failed.";
+        injectIapResult(
+          data.type === "ZUKO_IAP_RESTORE"
+            ? "__ZUKO_IAP_RESTORE_CB__"
+            : "__ZUKO_IAP_CB__",
+          "reject",
+          message,
+        );
+      }
+    },
+    [injectIapResult],
+  );
 
   useEffect(() => {
     void loadOrCreateInstallId().then(setInstallId);
@@ -283,20 +478,14 @@ true;`);
       localStorage.setItem('zuko_android_shell_v1', '1');
     }
   } catch (e) {}
-  window.LumaNativeIap = window.LumaNativeIap || {
+  var nativeIap = window.ZukoNativeIap || window.LumaNativeIap || {
+    isNativeGooglePlay: true,
     purchase: function(sku){
       return new Promise(function(resolve, reject){
         try {
           if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
             window.__ZUKO_IAP_CB__ = { resolve: resolve, reject: reject, sku: sku };
             window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ZUKO_IAP_PURCHASE', sku: sku }));
-            // Fail fast so web checkout can open without a long fake wait
-            setTimeout(function(){
-              if (window.__ZUKO_IAP_CB__) {
-                window.__ZUKO_IAP_CB__ = null;
-                reject(new Error('Native Play Billing not linked yet — use web checkout'));
-              }
-            }, 400);
           } else { reject(new Error('Native bridge unavailable')); }
         } catch (err) { reject(err); }
       });
@@ -305,13 +494,26 @@ true;`);
       return new Promise(function(resolve, reject){
         try {
           if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+            window.__ZUKO_IAP_RESTORE_CB__ = { resolve: resolve, reject: reject };
             window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'ZUKO_IAP_RESTORE' }));
-          }
-          resolve({ restored: false });
+          } else { reject(new Error('Native bridge unavailable')); }
         } catch (err) { reject(err); }
       });
+    },
+    finish: function(purchaseToken){
+      try {
+        if (window.ReactNativeWebView && window.ReactNativeWebView.postMessage) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({
+            type: 'ZUKO_IAP_FINISH',
+            purchaseToken: purchaseToken
+          }));
+        }
+      } catch (e) {}
+      return Promise.resolve();
     }
   };
+  window.ZukoNativeIap = nativeIap;
+  window.LumaNativeIap = nativeIap;
 })();
 true;`;
   }, [installId, insets.top, insets.bottom, insets.left, insets.right]);
@@ -400,23 +602,17 @@ true;`;
                   const data = JSON.parse(event.nativeEvent.data || "{}") as {
                     type?: string;
                     sku?: string;
+                    purchaseToken?: string;
                     handled?: boolean;
                     count?: number;
                   };
-                  if (data.type === "ZUKO_IAP_PURCHASE") {
-                    // Native Play Billing not linked — reject so web checkout runs
-                    webRef.current?.injectJavaScript(`
-(function(){
-  try {
-    if (window.__ZUKO_IAP_CB__ && window.__ZUKO_IAP_CB__.reject) {
-      var rej = window.__ZUKO_IAP_CB__.reject;
-      window.__ZUKO_IAP_CB__ = null;
-      rej(new Error('Native Play Billing not linked — use web checkout'));
-    }
-  } catch (e) {}
-  true;
-})();
-true;`);
+                  if (
+                    data.type === "ZUKO_IAP_PURCHASE" ||
+                    data.type === "ZUKO_IAP_RESTORE" ||
+                    data.type === "ZUKO_IAP_FINISH"
+                  ) {
+                    void handleIapMessage(data);
+                    return;
                   }
                   if (data.type === "ZUKO_BACK_AT_ROOT") {
                     BackHandler.exitApp();
